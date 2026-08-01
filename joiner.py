@@ -39,13 +39,27 @@ async def check_membership(page, group_url, tag=""):
     scope = page.locator('div[role="main"]').first
     scopes = [scope, page] if await scope.count() > 0 else [page]
 
-    # JOINED
+    # JOINED — cek duluan (prioritas tinggi)
+    # Pakai aria-label untuk exact match, has-text untuk fallback
     for s in scopes:
         for txt in config.JOINED_TEXTS:
             try:
-                loc = s.locator(f'div[role="button"][aria-label="{txt}"], div[role="button"]:has-text("{txt}")')
-                if await loc.count() > 0 and await loc.first.is_visible(timeout=300):
+                # aria-label = exact match (tidak ada masalah substring)
+                loc_aria = s.locator(f'div[role="button"][aria-label="{txt}"]')
+                if await loc_aria.count() > 0 and await loc_aria.first.is_visible(timeout=300):
                     return "JOINED"
+                # has-text = cek apakah teks EXACT match (bukan substring)
+                loc_text = s.locator(f'div[role="button"]:has-text("{txt}")')
+                cnt = await loc_text.count()
+                for i in range(min(cnt, 5)):
+                    el = loc_text.nth(i)
+                    try:
+                        inner = (await el.inner_text(timeout=300)).strip().lower()
+                        if inner == txt.lower():  # EXACT match
+                            if await el.is_visible(timeout=300):
+                                return "JOINED"
+                    except Exception:
+                        continue
             except Exception:
                 continue
 
@@ -72,7 +86,7 @@ async def check_membership(page, group_url, tag=""):
     # Cek composer trigger = sudah anggota
     for txt in config.TRIGGER_TEXTS:
         try:
-            loc = page.locator(f'div[role="button"]:has-text("{txt}")').first
+            loc = page.locator(f'div[role="button"]:has-text("{txt}"), span:has-text("{txt}")').first
             if await loc.count() > 0 and await loc.is_visible(timeout=300):
                 return "JOINED"
         except Exception:

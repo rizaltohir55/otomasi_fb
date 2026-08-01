@@ -71,12 +71,14 @@ TRIGGER_TEXTS = [
 ]
 SUBMIT_TEXTS = ["Post", "Posting", "Publish", "Publikasikan", "Submit", "Kirim"]
 JOIN_TEXTS = [
-    "Gabung ke grup", "Join group", "Bergabung", "Gabung", "Join Group",
-    "Minta Bergabung", "Join", "Unirse", "Participar", "Rejoindre",
+    "Gabung ke grup", "Join group", "Bergabung dengan grup",
+    "Gabung grup", "Join Group",
+    "Minta Bergabung", "Unirse al grupo", "Participar do grupo",
+    "Rejoindre le groupe", "Gruppe beitreten",
 ]
 JOINED_TEXTS = [
-    "Sudah bergabung", "Joined", "Bergabung", "Undang", "Invite",
-    "Anda anggota", "Member", "Anggota",
+    "Sudah bergabung", "Joined", "Bergabung", "Gabung", "Undang", "Invite",
+    "Anda anggota", "You're a member", "Member", "Anggota",
 ]
 PENDING_TEXTS = [
     "Request sent", "Permintaan terkirim", "Cancel request",
