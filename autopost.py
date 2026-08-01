@@ -9,6 +9,7 @@ import argparse
 import asyncio
 
 import config
+from utils.helpers import auto_pull_github
 from manager.runner import fix_windows_stdout_encoding, run_worker_entry, launch_multiprocess_runner
 from manager.session_manager import discover_all_sessions, interactive_login_new_account
 from engine.collector import load_groups
@@ -17,6 +18,7 @@ from ui.dashboard import print_banner, display_account_menu, display_mode_menu, 
 
 def main():
     fix_windows_stdout_encoding()
+    auto_pull_github()
 
     parser = argparse.ArgumentParser(
         description="FB AutoEngine 3.0 Ultra (Pure Desktop React ARIA Automation & Multi-Account Engine)"

@@ -11,6 +11,7 @@ import webbrowser
 import uvicorn
 
 import config
+from utils.helpers import auto_pull_github
 
 def open_browser_delayed(url: str, delay_sec: float = 1.5):
 
@@ -24,6 +25,8 @@ def main():
             sys.stdout.reconfigure(encoding="utf-8")
         except Exception:
             pass
+
+    auto_pull_github()
 
     port = 8000
     host = "127.0.0.1"

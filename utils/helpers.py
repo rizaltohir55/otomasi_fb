@@ -6,14 +6,51 @@ import re
 import os
 import sys
 import time
-from datetime import datetime
-
-from typing import Tuple
-
+import subprocess
 import asyncio
+from datetime import datetime
 from typing import Tuple, Set
 
 import config
+
+
+def safe_print(msg: str):
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        safe_str = msg.encode(sys.stdout.encoding or 'ascii', errors='replace').decode(sys.stdout.encoding or 'ascii')
+        print(safe_str, flush=True)
+    except Exception:
+        pass
+
+
+def auto_pull_github():
+    """
+    Melakukan git pull otomatis dari GitHub saat startup untuk memastikan
+    kode di mesin lokal selalu ter-sinkronisasi dengan repository remote.
+    """
+    safe_print("🔄 Memeriksa & menyinkronkan kode terbaru dari GitHub...")
+    try:
+        res = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        output = res.stdout.strip() or res.stderr.strip()
+        if res.returncode == 0:
+            if "Already up to date" in output or "Already up-to-date" in output:
+                safe_print("✅ Kode lokal sudah sinkron dengan repository GitHub.")
+            else:
+                safe_print(f"⚡ Pembaruan dari GitHub berhasil ditarik:\n{output}")
+        else:
+            safe_print(f"⚠️ Catatan sinkronisasi GitHub: {output}")
+    except subprocess.TimeoutExpired:
+        safe_print("⚠️ Waktu sinkronisasi GitHub habis (timeout 15 detik), melanjutkan dengan kode saat ini.")
+    except Exception as e:
+        safe_print(f"⚠️ Tidak dapat mengeksekusi git pull: {e}")
+
+
 
 
 class LogBroadcaster:
