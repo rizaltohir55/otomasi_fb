@@ -16,16 +16,33 @@ import config
 from utils.helpers import log
 from utils.browser import random_human_delay, safe_goto
 from utils.monitor import live_monitor
+from utils.retry import (
+    safe_browser_cleanup,
+    restriction_cooldown,
+    group_skip_list,
+    get_global_cancel_token,
+    reset_global_cancel,
+)
 from engine.browser import (
     create_stealth_context,
     save_session_state,
     verify_login_status,
     generate_deterministic_profile,
+    get_session_info,
 )
 from engine.collector import load_caption, find_media_images
 from engine.composer import execute_post_to_group
 from engine.joiner import execute_join_group, check_membership_status
 from engine.commenter import execute_auto_comment_on_group
+
+
+# ── Mode constants ─────────────────────────────────────────────────────────────
+VALID_MODES = {"1", "2", "3"}
+MODE_TEXT = {
+    "1": "Auto Post ke Grup",
+    "2": "Auto Join Grup",
+    "3": "Auto Post + Auto Join",
+}
 
 
 def fix_windows_stdout_encoding():
@@ -36,6 +53,14 @@ def fix_windows_stdout_encoding():
             sys.stderr.reconfigure(encoding="utf-8")
         except AttributeError:
             pass
+
+
+def validate_mode(mode: str) -> str:
+    """Validasi mode input. Return mode jika valid, raise ValueError jika tidak."""
+    mode_str = str(mode).strip()
+    if mode_str not in VALID_MODES:
+        raise ValueError(f"Mode tidak valid: '{mode}'. Mode yang didukung: {sorted(VALID_MODES)} ({MODE_TEXT})")
+    return mode_str
 
 
 async def worker_loop(
@@ -127,165 +152,277 @@ async def worker_loop(
 
     notify_status("INITIALIZING", step_msg="Menyiapkan browser context...")
 
-    async with async_playwright() as p:
-        try:
-            browser, context = await create_stealth_context(p, session_file=session_file, headless=headless)
-            page = await context.new_page()
-        except Exception as e:
-            log(f"❌ Gagal menginisialisasi browser context untuk [{worker_tag}]: {e}", worker_tag)
-            notify_status("FAILED", step_msg=f"Gagal inisialisasi browser: {e}")
-            return {
-                "session_file": session_file,
-                "worker_tag": worker_tag,
-                "account_name": account_name,
-                "status": "ERROR_INIT",
-                "success_count": 0,
-                "fail_count": len(worker_groups),
-                "total_groups": len(worker_groups),
-                "duration_sec": round(time.time() - start_time, 1),
-                "spoof_info": spoof_info
-            }
+    # Cek cooldown pembatasan — kalau akun masih cooldown, langsung fail tanpa buka browser
+    info = get_session_info(session_file)
+    c_user_id = info.get("c_user", "")
+    if c_user_id and restriction_cooldown.is_in_cooldown(c_user_id):
+        remaining = restriction_cooldown.remaining_sec(c_user_id)
+        log(f"🛡️ Akun [{worker_tag}] masih dalam cooldown RESTRICTED ({remaining:.0f}s tersisa). Skip.", worker_tag)
+        notify_status("RESTRICTED", step_msg=f"Akun cooldown {remaining:.0f}s")
+        return {
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": account_name,
+            "status": "RESTRICTED_COOLDOWN",
+            "success_count": 0,
+            "fail_count": len(worker_groups),
+            "total_groups": len(worker_groups),
+            "duration_sec": round(time.time() - start_time, 1),
+            "spoof_info": spoof_info
+        }
 
-        # Verifikasi Login awal
-        notify_status("CHECKING_LOGIN", step_msg="Memeriksa status cookie Facebook...")
-        try:
-            await safe_goto(page, "https://www.facebook.com/", timeout_ms=20000)
-        except Exception as e:
-            log(f"⚠️ Navigasi awal Facebook berhalangan: {e}", worker_tag)
+    # Validasi mode input (fail fast)
+    try:
+        validate_mode(mode)
+    except ValueError as ve:
+        log(f"❌ {ve}", worker_tag)
+        notify_status("FAILED", step_msg=str(ve))
+        return {
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": account_name,
+            "status": "INVALID_MODE",
+            "success_count": 0,
+            "fail_count": len(worker_groups),
+            "total_groups": len(worker_groups),
+            "duration_sec": round(time.time() - start_time, 1),
+            "spoof_info": spoof_info
+        }
 
-        is_logged_in = await verify_login_status(page)
-        if not is_logged_in:
-            log(f"❌ Worker [{worker_tag}] GAGAL LOGIN. Cookie sesi kedaluwarsa atau ter-checkpoint.", worker_tag)
-            notify_status("EXPIRED", step_msg="Sesi cookie kedaluwarsa/checkpoint")
-            await browser.close()
-            return {
-                "session_file": session_file,
-                "worker_tag": worker_tag,
-                "account_name": account_name,
-                "status": "EXPIRED",
-                "success_count": 0,
-                "fail_count": len(worker_groups),
-                "total_groups": len(worker_groups),
-                "duration_sec": round(time.time() - start_time, 1),
-                "spoof_info": spoof_info
-            }
+    # Filter grup yang ada di skip-list
+    initial_count = len(worker_groups)
+    if group_skip_list.count() > 0:
+        worker_groups = [g for g in worker_groups if not group_skip_list.is_skipped(g)]
+        skipped_count = initial_count - len(worker_groups)
+        if skipped_count > 0:
+            log(f"🚫 {skipped_count} grup diskip (ada di skip-list). {len(worker_groups)} grup tersisa.", worker_tag)
 
-        log(f"✅ Sesi terverifikasi aktif. Memulai pemrosesan {len(worker_groups)} grup...", worker_tag)
+    # Reset cancellation token di awal setiap worker_loop
+    cancel_token = get_global_cancel_token()
+    try:
+        cancel_token.reset()
+    except Exception:
+        pass
 
-        for idx, group_url in enumerate(worker_groups, 1):
-            log(f"\n[{worker_tag}] [{idx}/{len(worker_groups)}] Memproses grup: {group_url}")
-            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Memproses grup [{idx}/{len(worker_groups)}]")
+    browser = None
+    context = None
+    page = None
 
+    try:
+        async with async_playwright() as p:
             try:
-                if mode in ["1", "3"]:
-                    # Mode 1 & 3: Auto Post / Auto Post + Auto Join
-                    mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
-
-                    if mem_status == "RESTRICTED":
-                        log(f"   ⛔ AKUN DIBATASI FACEBOOK: Menghentikan worker [{worker_tag}] agar akun aman.", worker_tag)
-                        fail_count += (len(worker_groups) - idx + 1)
-                        worker_status = "RESTRICTED"
-                        notify_status("RESTRICTED", current_group=group_url, current_idx=idx, step_msg="Akun dibatasi FB (Restricted)")
-                        break
-
-                    if mem_status == "UNKNOWN":
-                        await page.wait_for_timeout(2000)
-                        mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
-
-                    if mem_status == "NOT_LOGGED_IN":
-                        log(f"   ❌ Sesi login terputus / kedaluwarsa pada grup {group_url}.", worker_tag)
-                        log(f"   ⚠️ Menghentikan eksekusi worker [{worker_tag}] karena akun butuh login ulang.", worker_tag)
-                        fail_count += (len(worker_groups) - idx + 1)
-                        worker_status = "EXPIRED"
-                        notify_status("EXPIRED", current_group=group_url, current_idx=idx, step_msg="Sesi login terputus saat eksekusi")
-                        break
-
-                    if mem_status in ["NOT_JOINED", "UNKNOWN"]:
-                        log(f"   ℹ️ Terdeteksi belum bergabung (Status: {mem_status}). Menjalankan proses Gabung Grup...", worker_tag)
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Mengirim permintaan Gabung Grup...")
-                        join_ok = await execute_join_group(page, group_url, worker_tag=worker_tag)
-                        if not join_ok:
-                            log(f"   ⚠️ Gagal bergabung ke grup. Postingan dibatalkan.", worker_tag)
-                            fail_count += 1
-                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal gabung grup")
-                            continue
-                        await random_human_delay(2.0, 3.0)
-                        mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
-
-                    if mem_status == "PENDING":
-                        log(f"   ⏳ Permintaan bergabung dikirim & PENDING (Menunggu Persetujuan Admin). Post dibatalkan.", worker_tag)
-                        fail_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Status bergabung Pending Admin")
-                        continue
-
-                    if mem_status != "JOINED":
-                        log(f"   ⚠️ Status keanggotaan belum JOINED (Status akhir: {mem_status}). Post dibatalkan.", worker_tag)
-                        fail_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Bukan anggota grup ({mem_status})")
-                        continue
-
-                    notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Menulis caption & mengunggah postingan...")
-                    ok = await execute_post_to_group(page, group_url, caption, media_images, worker_tag=worker_tag)
-                    if ok:
-                        success_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Postingan berhasil dikirim!")
-                        await execute_auto_comment_on_group(page, group_url)
-                    else:
-                        fail_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal membuat postingan")
-
-                elif mode == "2":
-                    # Mode 2: Auto Join Saja
-                    if "login" in page.url.lower() or "checkpoint" in page.url.lower():
-                        log(f"   ❌ Sesi login terputus / kedaluwarsa pada grup {group_url}.", worker_tag)
-                        log(f"   ⚠️ Menghentikan eksekusi worker [{worker_tag}] karena akun mebutuhkan login ulang.", worker_tag)
-                        fail_count += (len(worker_groups) - idx + 1)
-                        worker_status = "EXPIRED"
-                        notify_status("EXPIRED", current_group=group_url, current_idx=idx, step_msg="Sesi login terputus")
-                        break
-                    
-                    notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Menjalankan Auto Join Grup...")
-                    ok = await execute_join_group(page, group_url, worker_tag=worker_tag)
-                    if ok:
-                        success_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Berhasil kirim bergabung!")
-                    else:
-                        fail_count += 1
-                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal bergabung grup")
-
+                browser, context = await create_stealth_context(p, session_file=session_file, headless=headless)
+                page = await context.new_page()
             except Exception as e:
-                log(f"❌ Error pada grup {group_url}: {e}", worker_tag)
-                fail_count += 1
-                notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Error: {e}")
+                log(f"❌ Gagal menginisialisasi browser context untuk [{worker_tag}]: {e}", worker_tag)
+                notify_status("FAILED", step_msg=f"Gagal inisialisasi browser: {e}")
+                return {
+                    "session_file": session_file,
+                    "worker_tag": worker_tag,
+                    "account_name": account_name,
+                    "status": "ERROR_INIT",
+                    "success_count": 0,
+                    "fail_count": len(worker_groups),
+                    "total_groups": len(worker_groups),
+                    "duration_sec": round(time.time() - start_time, 1),
+                    "spoof_info": spoof_info
+                }
 
-            if idx < len(worker_groups):
-                delay = random.uniform(config.DELAY_BETWEEN_GROUPS_MIN, config.DELAY_BETWEEN_GROUPS_MAX)
-                log(f"⏳ Jeda emulasi manusia {delay:.1f} detik...", worker_tag)
-                notify_status("WAITING_DELAY", current_group=group_url, current_idx=idx, step_msg=f"Jeda manusia {delay:.1f}s", delay_sec=delay)
-                await asyncio.sleep(delay)
+            # Verifikasi Login awal
+            notify_status("CHECKING_LOGIN", step_msg="Memeriksa status cookie Facebook...")
+            try:
+                await safe_goto(page, "https://www.facebook.com/", timeout_ms=20000)
+            except Exception as e:
+                log(f"⚠️ Navigasi awal Facebook berhalangan: {e}", worker_tag)
 
-        await save_session_state(context, session_file)
-        await browser.close()
+            is_logged_in = await verify_login_status(page)
+            if not is_logged_in:
+                log(f"❌ Worker [{worker_tag}] GAGAL LOGIN. Cookie sesi kedaluwarsa atau ter-checkpoint.", worker_tag)
+                notify_status("EXPIRED", step_msg="Sesi cookie kedaluwarsa/checkpoint")
+                return {
+                    "session_file": session_file,
+                    "worker_tag": worker_tag,
+                    "account_name": account_name,
+                    "status": "EXPIRED",
+                    "success_count": 0,
+                    "fail_count": len(worker_groups),
+                    "total_groups": len(worker_groups),
+                    "duration_sec": round(time.time() - start_time, 1),
+                    "spoof_info": spoof_info
+                }
 
-        duration = round(time.time() - start_time, 1)
-        log(f"\n=======================================================", worker_tag)
-        log(f"🎉 Worker [{worker_tag}] SELESAI ({duration} detik)", worker_tag)
-        log(f"📊 Hasil: {success_count} Sukses | {fail_count} Gagal | Total {len(worker_groups)} Grup", worker_tag)
-        log(f"=======================================================", worker_tag)
+            log(f"✅ Sesi terverifikasi aktif. Memulai pemrosesan {len(worker_groups)} grup...", worker_tag)
 
-        notify_status("COMPLETED", current_idx=len(worker_groups), step_msg=f"Worker Selesai ({success_count} Sukses, {fail_count} Gagal)")
+            for idx, group_url in enumerate(worker_groups, 1):
+                # Cek cancellation token sebelum memproses grup berikutnya
+                if cancel_token.is_cancelled():
+                    log(f"🛑 Cancellation diterima — menghentikan worker [{worker_tag}] pada grup {idx}.", worker_tag)
+                    fail_count += (len(worker_groups) - idx + 1)
+                    worker_status = "ABORTED"
+                    notify_status("ABORTED", current_group=group_url, current_idx=idx, step_msg="Dibatalkan pengguna")
+                    break
 
+                log(f"\n[{worker_tag}] [{idx}/{len(worker_groups)}] Memproses grup: {group_url}")
+                notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Memproses grup [{idx}/{len(worker_groups)}]")
+
+                try:
+                    if mode in ["1", "3"]:
+                        # Mode 1 & 3: Auto Post / Auto Post + Auto Join
+                        mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
+
+                        if mem_status == "RESTRICTED":
+                            log(f"   ⛔ AKUN DIBATASI FACEBOOK: Menghentikan worker [{worker_tag}] agar akun aman.", worker_tag)
+                            # Tandai cooldown agar worker lain tidak pakai akun ini
+                            if c_user_id:
+                                restriction_cooldown.mark_restricted(c_user_id, reason=f"detected at group {group_url}")
+                            fail_count += (len(worker_groups) - idx + 1)
+                            worker_status = "RESTRICTED"
+                            notify_status("RESTRICTED", current_group=group_url, current_idx=idx, step_msg="Akun dibatasi FB (Restricted)")
+                            break
+
+                        if mem_status == "UNKNOWN":
+                            await page.wait_for_timeout(2000)
+                            mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
+
+                        if mem_status == "NOT_LOGGED_IN":
+                            log(f"   ❌ Sesi login terputus / kedaluwarsa pada grup {group_url}.", worker_tag)
+                            log(f"   ⚠️ Menghentikan eksekusi worker [{worker_tag}] karena akun butuh login ulang.", worker_tag)
+                            fail_count += (len(worker_groups) - idx + 1)
+                            worker_status = "EXPIRED"
+                            notify_status("EXPIRED", current_group=group_url, current_idx=idx, step_msg="Sesi login terputus saat eksekusi")
+                            break
+
+                        if mem_status in ["NOT_JOINED", "UNKNOWN"]:
+                            log(f"   ℹ️ Terdeteksi belum bergabung (Status: {mem_status}). Menjalankan proses Gabung Grup...", worker_tag)
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Mengirim permintaan Gabung Grup...")
+                            join_ok = await execute_join_group(page, group_url, worker_tag=worker_tag)
+                            if not join_ok:
+                                log(f"   ⚠️ Gagal bergabung ke grup. Postingan dibatalkan.", worker_tag)
+                                fail_count += 1
+                                # Tandai grup ke skip-list supaya tidak di-retry sesi berikutnya
+                                group_skip_list.add(group_url, reason="join failed")
+                                notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal gabung grup")
+                                continue
+                            await random_human_delay(2.0, 3.0)
+                            mem_status = await check_membership_status(page, group_url, worker_tag=worker_tag)
+
+                        if mem_status == "PENDING":
+                            log(f"   ⏳ Permintaan bergabung dikirim & PENDING (Menunggu Persetujuan Admin). Post dibatalkan.", worker_tag)
+                            fail_count += 1
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Status bergabung Pending Admin")
+                            continue
+
+                        if mem_status != "JOINED":
+                            log(f"   ⚠️ Status keanggotaan belum JOINED (Status akhir: {mem_status}). Post dibatalkan.", worker_tag)
+                            fail_count += 1
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Bukan anggota grup ({mem_status})")
+                            continue
+
+                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Menulis caption & mengunggah postingan...")
+                        ok = await execute_post_to_group(page, group_url, caption, media_images, worker_tag=worker_tag)
+                        if ok:
+                            success_count += 1
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Postingan berhasil dikirim!")
+                            # Auto-comment hanya jika fitur diaktifkan di config
+                            try:
+                                if config.AUTO_COMMENT_ENABLED or config.AUTO_LIKE_ENABLED:
+                                    await execute_auto_comment_on_group(page, group_url)
+                            except Exception as cmt_e:
+                                log(f"   ⚠️ Auto-comment gagal (non-fatal): {cmt_e}", worker_tag)
+                        else:
+                            fail_count += 1
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal membuat postingan")
+
+                    elif mode == "2":
+                        # Mode 2: Auto Join Saja
+                        if "login" in page.url.lower() or "checkpoint" in page.url.lower():
+                            log(f"   ❌ Sesi login terputus / kedaluwarsa pada grup {group_url}.", worker_tag)
+                            log(f"   ⚠️ Menghentikan eksekusi worker [{worker_tag}] karena akun mebutuhkan login ulang.", worker_tag)
+                            fail_count += (len(worker_groups) - idx + 1)
+                            worker_status = "EXPIRED"
+                            notify_status("EXPIRED", current_group=group_url, current_idx=idx, step_msg="Sesi login terputus")
+                            break
+
+                        notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Menjalankan Auto Join Grup...")
+                        ok = await execute_join_group(page, group_url, worker_tag=worker_tag)
+                        if ok:
+                            success_count += 1
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Berhasil kirim bergabung!")
+                        else:
+                            fail_count += 1
+                            group_skip_list.add(group_url, reason="join failed (mode 2)")
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal bergabung grup")
+
+                except Exception as e:
+                    log(f"❌ Error pada grup {group_url}: {e}", worker_tag)
+                    fail_count += 1
+                    notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Error: {e}")
+
+                # Jeda emulasi manusia antar grup (skip jeda untuk grup terakhir)
+                if idx < len(worker_groups):
+                    delay = random.uniform(config.DELAY_BETWEEN_GROUPS_MIN, config.DELAY_BETWEEN_GROUPS_MAX)
+                    log(f"⏳ Jeda emulasi manusia {delay:.1f} detik...", worker_tag)
+                    notify_status("WAITING_DELAY", current_group=group_url, current_idx=idx, step_msg=f"Jeda manusia {delay:.1f}s", delay_sec=delay)
+                    # Sleep secara iteratif supaya bisa dicek cancellation setiap 0.5s
+                    sleep_end = time.time() + delay
+                    while time.time() < sleep_end:
+                        if cancel_token.is_cancelled():
+                            log(f"🛑 Cancellation diterima saat jeda worker [{worker_tag}].", worker_tag)
+                            worker_status = "ABORTED"
+                            break
+                        await asyncio.sleep(0.5)
+                    if worker_status == "ABORTED":
+                        break
+
+            # Save session state SEBELUM browser.close() agar cookie terbaru tersimpan
+            try:
+                if context:
+                    await save_session_state(context, session_file)
+            except Exception as save_e:
+                log(f"⚠️ Gagal menyimpan sesi akhir: {save_e}", worker_tag)
+
+            duration = round(time.time() - start_time, 1)
+            log(f"\n=======================================================", worker_tag)
+            log(f"🎉 Worker [{worker_tag}] SELESAI ({duration} detik)", worker_tag)
+            log(f"📊 Hasil: {success_count} Sukses | {fail_count} Gagal | Total {len(worker_groups)} Grup", worker_tag)
+            log(f"=======================================================", worker_tag)
+
+            notify_status("COMPLETED", current_idx=len(worker_groups), step_msg=f"Worker Selesai ({success_count} Sukses, {fail_count} Gagal)")
+
+            return {
+                "session_file": session_file,
+                "worker_tag": worker_tag,
+                "account_name": account_name,
+                "status": worker_status,
+                "success_count": success_count,
+                "fail_count": fail_count,
+                "total_groups": len(worker_groups),
+                "duration_sec": duration,
+                "spoof_info": spoof_info
+            }
+
+    except asyncio.CancelledError:
+        log(f"🛑 Worker [{worker_tag}] dibatalkan (CancelledError).", worker_tag)
+        worker_status = "ABORTED"
+        raise
+    except Exception as fatal_e:
+        log(f"💥 Fatal error pada worker [{worker_tag}]: {fatal_e}", worker_tag)
+        worker_status = "FATAL_ERROR"
         return {
             "session_file": session_file,
             "worker_tag": worker_tag,
             "account_name": account_name,
             "status": worker_status,
             "success_count": success_count,
-            "fail_count": fail_count,
+            "fail_count": fail_count + (len(worker_groups) - success_count - fail_count),
             "total_groups": len(worker_groups),
-            "duration_sec": duration,
+            "duration_sec": round(time.time() - start_time, 1),
             "spoof_info": spoof_info
         }
+    finally:
+        # Selalu tutup browser dengan aman walau terjadi exception.
+        # Ini mencegah zombie Chromium yang menguras RAM.
+        await safe_browser_cleanup(browser=browser, context=context, page=page)
 
 
 def _multiprocess_entry_point(
@@ -304,7 +441,34 @@ def _multiprocess_entry_point(
         res = asyncio.run(worker_loop(session_file, groups, mode, worker_tag, headless, randomize_groups, status_queue=status_queue))
         result_queue.put(res)
     except KeyboardInterrupt:
-        pass
+        # Pengguna menekan Ctrl+C — kirim sinyal cancel ke child process lain via shared token.
+        # (Tidak bisa langsung pakai global token karena separate process, tapi parent akan
+        # menangkap ini dan meng-terminate sibling juga.)
+        log(f"🛑 Worker [{worker_tag}] diinterrupt oleh pengguna (KeyboardInterrupt).", worker_tag)
+        result_queue.put({
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": worker_tag,
+            "status": "ABORTED",
+            "success_count": 0,
+            "fail_count": len(groups),
+            "total_groups": len(groups),
+            "duration_sec": 0,
+            "spoof_info": "N/A"
+        })
+    except asyncio.CancelledError:
+        log(f"🛑 Worker [{worker_tag}] dibatalkan (CancelledError).", worker_tag)
+        result_queue.put({
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": worker_tag,
+            "status": "ABORTED",
+            "success_count": 0,
+            "fail_count": len(groups),
+            "total_groups": len(groups),
+            "duration_sec": 0,
+            "spoof_info": "N/A"
+        })
     except Exception as e:
         log(f"❌ Error fatal pada proses worker [{worker_tag}]: {e}", worker_tag)
         result_queue.put({
@@ -330,11 +494,32 @@ def run_worker_entry(
 ):
     """Jalankan worker tunggal di dalam event loop utama."""
     fix_windows_stdout_encoding()
+    # Validasi mode sebelum reset monitor
+    try:
+        validate_mode(mode)
+    except ValueError as ve:
+        log(f"❌ {ve}")
+        live_monitor.mark_completed(f"Gagal: mode tidak valid '{mode}'")
+        raise ve
     live_monitor.reset(total_accounts=1, total_groups_target=len(groups), mode=mode)
     try:
         res = asyncio.run(worker_loop(session_file, groups, mode, worker_tag, headless, randomize_groups))
         live_monitor.mark_completed("Selesai")
         return res
+    except asyncio.CancelledError:
+        log(f"🛑 Worker tunggal dibatalkan (CancelledError).")
+        live_monitor.mark_completed("Dibatalkan")
+        return {
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": worker_tag,
+            "status": "ABORTED",
+            "success_count": 0,
+            "fail_count": len(groups),
+            "total_groups": len(groups),
+            "duration_sec": 0,
+            "spoof_info": "N/A"
+        }
     except Exception as e:
         live_monitor.mark_completed(f"Gagal: {e}")
         raise e
@@ -385,21 +570,46 @@ def launch_multiprocess_runner(
 ):
     """
     Luncurkan seluruh worker multi-akun secara terkontrol menggunakan Worker Concurrency Pool & Stagger Delay.
+
+    Peningkatan:
+    - Validasi mode input (fail fast sebelum spawn process).
+    - Jitter acak saat startup tiap worker supaya tidak semua akun membuka FB bersamaan.
+    - join(timeout) pada child process setelah terminate supaya tidak ada proses orphan.
+    - Drain status_queue dengan interval lebih panjang (200ms) untuk kurangi CPU usage.
+    - Setiap child process yang crash tidak menghentikan sibling lain.
     """
+    # Validasi mode SEBELUM spawn process apapun
+    try:
+        validate_mode(mode)
+    except ValueError as ve:
+        log(f"❌ {ve}")
+        live_monitor.mark_completed(f"Gagal: mode tidak valid '{mode}'")
+        return
+
     targets = session_files or selected_sessions or []
     groups_list = groups or []
+    if not targets:
+        log("❌ Tidak ada sesi akun dipilih untuk multi-process runner.")
+        live_monitor.mark_completed("Gagal: tidak ada akun")
+        return
+    if not groups_list:
+        log("❌ Daftar grup kosong — tidak ada yang bisa diproses.")
+        live_monitor.mark_completed("Gagal: groups.txt kosong")
+        return
+
     start_total_time = time.time()
     effective_max_workers = max_workers or config.MAX_CONCURRENT_WORKERS
     effective_max_workers = max(1, min(effective_max_workers, len(targets)))
-    
+
     total_groups_target = len(targets) * len(groups_list)
     live_monitor.reset(total_accounts=len(targets), total_groups_target=total_groups_target, mode=mode)
 
     log(f"\n=======================================================")
     log(f"⚡ MENJALANKAN {len(targets)} AKUN (PARALEL CONCURRENCY POOL)")
     log(f"⚙️ Worker Paralel Maksimal: {effective_max_workers} Akun Bersamaan (Stagger Delay: {config.WORKER_STAGGER_DELAY_SEC}s)")
-    log(f"⚙️ Mode Browser: {'Headless (Stealth / Hemat CPU & RAM)' if headless else 'GUI Mode (Tampilan Chrome)'}")
+    log(f"⚙️ Mode: {MODE_TEXT.get(str(mode), mode)} | Browser: {'Headless' if headless else 'GUI'}")
     log(f"🛡️ Fingerprint Spoofing: AKTIF (User-Agent, Viewport, WebGL GPU, Client Hints & Canvas Noise)")
+    log(f"🎲 Startup Jitter: {config.WORKER_STARTUP_JITTER_MIN}-{config.WORKER_STARTUP_JITTER_MAX}s per worker")
     log(f"=======================================================")
 
     result_queue = multiprocessing.Queue()
@@ -410,10 +620,14 @@ def launch_multiprocess_runner(
     results = []
 
     def drain_status():
-        while not status_queue.empty():
+        # Drain dengan batas iterasi agar tidak busy-loop kalau antrian sangat panjang
+        for _ in range(50):
             try:
                 smsg = status_queue.get_nowait()
-                if smsg.get("action") == "UPDATE_WORKER":
+            except Exception:
+                break
+            if smsg.get("action") == "UPDATE_WORKER":
+                try:
                     live_monitor.update_worker(
                         worker_tag=smsg["worker_tag"],
                         account_name=smsg["account_name"],
@@ -428,14 +642,15 @@ def launch_multiprocess_runner(
                         spoof_info=smsg.get("spoof_info", ""),
                         delay_sec=smsg.get("delay_sec", 0.0)
                     )
-            except Exception:
-                break
+                except Exception:
+                    pass
 
     def sleep_and_drain(sec: float):
+        # Drain tiap 200ms (lebih hemat CPU dibanding 100ms) + responsif terhadap KeyboardInterrupt
         end_t = time.time() + sec
         while time.time() < end_t:
             drain_status()
-            time.sleep(0.1)
+            time.sleep(0.2)
 
     try:
         while pending_sessions or active_processes:
@@ -452,25 +667,40 @@ def launch_multiprocess_runner(
                 )
                 p.start()
                 active_processes.append(p)
-                log(f"🚀 Memulai worker [{tag}] (Active Workers: {len(active_processes)}/{effective_max_workers})...")
+                log(f"🚀 Memulai worker [{tag}] (Active: {len(active_processes)}/{effective_max_workers})...")
 
-                if pending_sessions and config.WORKER_STAGGER_DELAY_SEC > 0:
-                    sleep_and_drain(config.WORKER_STAGGER_DELAY_SEC)
+                if pending_sessions:
+                    # Jitter acak + stagger delay supaya tidak semua worker nge-hit FB bersamaan
+                    stagger = config.WORKER_STAGGER_DELAY_SEC
+                    jitter = random.uniform(
+                        config.WORKER_STARTUP_JITTER_MIN,
+                        config.WORKER_STARTUP_JITTER_MAX
+                    )
+                    total_wait = stagger + jitter
+                    sleep_and_drain(total_wait)
 
             # Cek & kurangi isi status_queue untuk pembaruan live_monitor
             drain_status()
             sleep_and_drain(0.4)
-            
+
             still_active = []
             for p in active_processes:
                 if p.is_alive():
                     still_active.append(p)
                 else:
-                    p.join()
+                    # join dengan timeout supaya tidak block selamanya
+                    try:
+                        p.join(timeout=2.0)
+                    except Exception:
+                        pass
+                    # Cek exit code untuk log
+                    exit_code = p.exitcode
+                    if exit_code is not None and exit_code != 0:
+                        log(f"⚠️ Worker process PID {p.pid} keluar dengan exit code {exit_code}.")
             active_processes = still_active
 
             # Kumpulkan hasil dari result_queue
-            while not result_queue.empty():
+            for _ in range(50):
                 try:
                     res = result_queue.get_nowait()
                     results.append(res)
@@ -479,19 +709,49 @@ def launch_multiprocess_runner(
 
     except KeyboardInterrupt:
         log("\n⛔ Pembatalan oleh pengguna (Ctrl+C)! Menghentikan seluruh worker paralel...")
+        # 1. Kirim SIGTERM dulu untuk graceful shutdown
         for p in active_processes:
             if p.is_alive():
-                p.terminate()
-        log("✅ Seluruh child process telah dihentikan secara bersih.")
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+        # 2. Tunggu maksimal 5 detik untuk graceful exit
+        grace_deadline = time.time() + 5.0
+        for p in active_processes:
+            remaining = max(0.1, grace_deadline - time.time())
+            try:
+                p.join(timeout=remaining)
+            except Exception:
+                pass
+        # 3. SIGKILL yang masih hidup (force kill)
+        for p in active_processes:
+            if p.is_alive():
+                try:
+                    log(f"💀 Force-killing PID {p.pid} (tidak merespons SIGTERM).")
+                    p.kill()
+                    p.join(timeout=1.0)
+                except Exception:
+                    pass
+        log("✅ Seluruh child process telah dihentikan.")
         live_monitor.mark_completed("Dibatalkan pengguna")
 
     # Kumpulkan sisa hasil
-    while not result_queue.empty():
+    for _ in range(100):
         try:
             res = result_queue.get_nowait()
             results.append(res)
         except Exception:
             break
+
+    # Pastikan tidak ada proses zombie tertinggal
+    for p in active_processes:
+        if p.is_alive():
+            try:
+                p.kill()
+                p.join(timeout=1.0)
+            except Exception:
+                pass
 
     total_dur = round(time.time() - start_total_time, 1)
     live_monitor.mark_completed("Selesai")

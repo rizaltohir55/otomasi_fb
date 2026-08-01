@@ -4,6 +4,7 @@ Manajer Siklus Hidup Browser & Sesi Playwright Stealth.
 """
 import os
 import json
+import time
 from typing import Dict, Any, Optional, Tuple
 from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
 
@@ -93,8 +94,22 @@ async def create_stealth_context(
     }
 
     if target_session and os.path.exists(target_session):
+        # Validate JSON file integrity before passing to Playwright.
+        # Playwright raises a cryptic error if storage_state file is malformed.
         try:
+            with open(target_session, "r", encoding="utf-8") as f:
+                _ = json.load(f)  # parse-check only
             context_kwargs["storage_state"] = target_session
+        except json.JSONDecodeError as je:
+            log(f"⚠️ File sesi {os.path.basename(target_session)} korup (JSON invalid): {je}")
+            log(f"   ⚠️ Browser akan diluncurkan tanpa cookie sesi. Akun akan terlihat logged-out.")
+            # Backup file korup agar user bisa investigasi
+            try:
+                bak = target_session + f".corrupt.{int(time.time())}"
+                os.rename(target_session, bak)
+                log(f"   📦 File korup dibackup ke: {os.path.basename(bak)}")
+            except OSError:
+                pass
         except Exception as e:
             log(f"⚠️ Gagal memuat storage_state dari {target_session}: {e}")
 
@@ -209,45 +224,113 @@ def get_session_info(session_file: str) -> Dict[str, str]:
 
 async def save_session_state(context: BrowserContext, session_file: str, name: str = ""):
     """Simpan cookie & storage state browser saat ini ke file JSON secara atomik."""
+    temp_file = session_file + ".tmp"
+    backup_file = session_file + ".bak"
     try:
         os.makedirs(os.path.dirname(os.path.abspath(session_file)), exist_ok=True)
         state = await context.storage_state()
-        
+
         if name:
-            state["meta"] = {"name": name}
-            
-        temp_file = session_file + ".tmp"
+            # Preserve existing meta keys (proxy, etc.) and only overwrite name
+            existing_meta = {}
+            try:
+                if os.path.exists(session_file):
+                    with open(session_file, "r", encoding="utf-8") as f:
+                        old_data = json.load(f)
+                    existing_meta = old_data.get("meta", {}) or {}
+            except Exception:
+                pass
+            existing_meta["name"] = name
+            state["meta"] = existing_meta
+
+        # Write to temp file first
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
-            
+
+        # Backup existing before replacing
         if os.path.exists(session_file):
-            os.remove(session_file)
+            try:
+                if os.path.exists(backup_file):
+                    os.remove(backup_file)
+                os.rename(session_file, backup_file)
+            except OSError:
+                pass
+
+        # Atomic rename
         os.rename(temp_file, session_file)
+        # Remove backup on success
+        if os.path.exists(backup_file):
+            try:
+                os.remove(backup_file)
+            except OSError:
+                pass
         log(f"💾 Sesi berhasil disimpan ke: {os.path.basename(session_file)}")
     except Exception as e:
         log(f"❌ Gagal menyimpan sesi ke {session_file}: {e}")
+        # Cleanup dangling temp file
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+        # Restore from backup if possible
+        if not os.path.exists(session_file) and os.path.exists(backup_file):
+            try:
+                os.rename(backup_file, session_file)
+                log(f"   🔄 Sesi sebelumnya direstore dari backup.")
+            except OSError:
+                pass
 
 
 async def verify_login_status(page: Page) -> bool:
-    """Verifikasi apakah sesi di browser saat ini dalam kondisi ter-login di Facebook."""
+    """
+    Verifikasi apakah sesi di browser saat ini dalam kondisi ter-login di Facebook.
+
+    Memeriksa:
+    - URL: terlempar ke /login, /checkpoint, /recover -> False
+    - Cookie: c_user ada -> True (paling cepat & andal)
+    - Elemen visual: tombol "Go to profile" terlihat -> True
+    - Form login terlihat -> False
+    - Teks checkpoint (2FA, "verify it's you") terdeteksi -> False
+    """
     try:
         url_lower = page.url.lower()
+        # Cek URL login/checkpoint/recover paling awal (paling cepat)
         if "login" in url_lower or "checkpoint" in url_lower or "recover" in url_lower:
+            return False
+        # URL beberapa subdomain yang menandakan tidak login
+        if "/www.facebook.com/login" in url_lower or "/m.facebook.com/login" in url_lower:
             return False
 
         cookies = await page.context.cookies()
         c_user = any(c.get("name") == "c_user" for c in cookies)
         if c_user:
+            # Walau c_user ada, tetap cek apakah halaman menampilkan checkpoint
+            try:
+                # Coba ambil inner_text body sekali, timeout pendek
+                body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
+                for kw in config.CHECKPOINT_INDICATOR_TEXTS:
+                    if kw in body_text:
+                        return False
+            except Exception:
+                pass
             return True
 
         # Cek elemen visual indikator login
-        profile_elem = page.get_by_role("link", name="Go to profile")
-        if await profile_elem.count() > 0 and await profile_elem.first.is_visible(timeout=1000):
-            return True
+        try:
+            profile_elem = page.get_by_role("link", name="Go to profile")
+            if await profile_elem.count() > 0 and await profile_elem.first.is_visible(timeout=1000):
+                return True
+        except Exception:
+            pass
 
-        login_form = page.locator("input[name='email'], input[id='email']")
-        if await login_form.count() > 0 and await login_form.first.is_visible(timeout=1000):
-            return False
+        # Cek form login -> pasti logged out
+        try:
+            login_form = page.locator("input[name='email'], input[id='email']")
+            if await login_form.count() > 0 and await login_form.first.is_visible(timeout=1000):
+                return False
+        except Exception:
+            pass
     except Exception:
         pass
     return False
@@ -255,33 +338,83 @@ async def verify_login_status(page: Page) -> bool:
 
 async def check_account_restriction(page: Page) -> Tuple[bool, str]:
     """
-    Periksa apakah akun yang ter-login terkena pembatasan posting/grup dari Facebook (Restricted Account / Action Blocked).
+    Periksa apakah akun yang ter-login terkena pembatasan posting/grup dari Facebook
+    (Restricted Account / Action Blocked).
+
+    Memindai:
+    - div[role="dialog"] dan div[role="alertdialog"] (modal pop-up)
+    - div[role="banner"], div[role="alert"] (banner & toast notifikasi)
+    - div[aria-live="polite"], div[aria-live="assertive"] (inline live regions FB modern)
+    - inline body text (paling lambat, fallback)
+
     Mengembalikan (is_restricted: bool, restriction_reason: str).
     """
     try:
         # 1. Cek dialog modal peringatan pembatasan
         dialogs = page.locator('div[role="dialog"], div[role="alertdialog"]')
         count = await dialogs.count()
-        for i in range(count):
+        for i in range(min(count, 5)):  # cap iteration untuk efisiensi
             d = dialogs.nth(i)
-            if await d.is_visible(timeout=200):
+            try:
+                if not await d.is_visible(timeout=200):
+                    continue
                 text = (await d.inner_text()).lower()
                 for kw in config.RESTRICTION_TEXTS:
                     if kw in text:
                         return True, f"Pop-up modal: '{kw}'"
+            except Exception:
+                continue
 
         # 2. Cek banner notifikasi di bagian atas halaman
         banners = page.locator('div[role="banner"], div[role="alert"]')
         b_count = await banners.count()
-        for j in range(b_count):
+        for j in range(min(b_count, 5)):
             b = banners.nth(j)
-            if await b.is_visible(timeout=200):
+            try:
+                if not await b.is_visible(timeout=200):
+                    continue
                 b_text = (await b.inner_text()).lower()
                 for kw in config.RESTRICTION_TEXTS:
                     if kw in b_text:
                         return True, f"Banner notifikasi: '{kw}'"
+            except Exception:
+                continue
+
+        # 3. Cek live regions (FB modern sering pakai aria-live untuk toast notifikasi)
+        live_regions = page.locator('div[aria-live="polite"], div[aria-live="assertive"]')
+        lr_count = await live_regions.count()
+        for k in range(min(lr_count, 5)):
+            lr = live_regions.nth(k)
+            try:
+                lr_text = (await lr.inner_text()).lower()
+                if not lr_text.strip():
+                    continue
+                for kw in config.RESTRICTION_TEXTS:
+                    if kw in lr_text:
+                        return True, f"Live region toast: '{kw}'"
+            except Exception:
+                continue
 
     except Exception:
         pass
     return False, ""
+
+
+async def is_on_checkpoint_page(page: Page) -> bool:
+    """
+    Deteksi apakah halaman saat ini adalah halaman checkpoint FB
+    (2FA, verifikasi identitas, "Save device", dsb).
+    Bisa dipakai sebelum setiap aksi automation untuk fail-fast.
+    """
+    try:
+        url_lower = page.url.lower()
+        if "checkpoint" in url_lower or "two_step_verification" in url_lower:
+            return True
+        body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
+        for kw in config.CHECKPOINT_INDICATOR_TEXTS:
+            if kw in body_text:
+                return True
+    except Exception:
+        pass
+    return False
 

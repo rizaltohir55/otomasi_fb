@@ -13,11 +13,37 @@ from engine.selectors import (
 )
 
 
-async def dismiss_all_overlays(page: Page):
+async def dismiss_all_overlays(page: Page, preserve_composer: bool = True):
     """
     Tutup dialog overlay, pop-up notifikasi, cookie consent, atau backdrop modal pengganggu.
     Mendukung berbagai bahasa (Indonesian, English, Spanish, French, German, dll).
+
+    Parameter:
+    - preserve_composer: jika True, JANGAN tutup dialog yang merupakan modal composer
+      postingan aktif (yaitu dialog yang berisi textbox contenteditable + tombol Post).
+      Default True — komposer aktif tidak akan ditutup secara tidak sengaja.
     """
+    # Identifikasi modal composer aktif supaya tidak ikut ditutup.
+    composer_dialog = None
+    if preserve_composer:
+        try:
+            composer_dialog = await get_active_composer_dialog(page)
+        except Exception:
+            composer_dialog = None
+
+    # Helper: cek apakah sebuah locator berada di dalam composer dialog aktif
+    async def _is_inside_composer(loc: Locator) -> bool:
+        if composer_dialog is None:
+            return False
+        try:
+            # Pakai evaluate: cek apakah elemen adalah descendant dari composer dialog
+            return await loc.evaluate(
+                "(el, root) => { if (!root || !el) return false; return root.contains(el); }",
+                composer_dialog
+            )
+        except Exception:
+            return False
+
     dismiss_buttons = [
         # Explicit aria-labels
         'div[role="dialog"] div[role="button"][aria-label="Close"]',
@@ -47,9 +73,15 @@ async def dismiss_all_overlays(page: Page):
     for sel in dismiss_buttons:
         try:
             btn = page.locator(sel).first
-            if await btn.count() > 0 and await btn.is_visible(timeout=300):
-                await btn.click(timeout=1000)
-                await page.wait_for_timeout(500)
+            if await btn.count() == 0:
+                continue
+            if not await btn.is_visible(timeout=300):
+                continue
+            # Skip jika tombol berada di dalam composer dialog aktif
+            if preserve_composer and await _is_inside_composer(btn):
+                continue
+            await btn.click(timeout=1000)
+            await page.wait_for_timeout(500)
         except Exception:
             pass
 

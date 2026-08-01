@@ -12,6 +12,7 @@ from playwright.async_api import Page, Locator
 import config
 from utils.helpers import log, normalize_group_url
 from utils.browser import random_human_delay, safe_goto
+from utils.retry import validate_media_files
 from engine.dom_analyzer import (
     dismiss_all_overlays,
     find_composer_trigger,
@@ -19,7 +20,7 @@ from engine.dom_analyzer import (
     find_submit_button,
     get_active_composer_dialog,
 )
-from engine.browser import check_account_restriction
+from engine.browser import check_account_restriction, is_on_checkpoint_page
 from engine.selectors import (
     DESKTOP_COMPOSER_TRIGGERS,
     CAPTION_TEXTBOX_SELECTORS,
@@ -99,6 +100,11 @@ async def open_group_composer(page: Page, target_url: str, worker_tag: str = "")
     is_res, res_reason = await check_account_restriction(page)
     if is_res:
         log(f"   ⛔ TERDETEKSI PEMBATASAN AKUN FB: {res_reason}", worker_tag)
+        return False
+
+    # 0b. Cek halaman checkpoint (2FA / verifikasi identitas)
+    if await is_on_checkpoint_page(page):
+        log(f"   🔐 Halaman CHECKPOINT terdeteksi. Tidak bisa membuka komposer.", worker_tag)
         return False
 
     # 1. Navigasi ke URL grup jika belum berada di halaman tersebut
@@ -226,10 +232,34 @@ async def type_post_caption(page: Page, text_content: str, worker_tag: str = "")
                 await textbox_loc.focus()
 
         await page.wait_for_timeout(200)
-        
-        # Bersihkan jika ada draf teks terdahulu
-        await page.keyboard.press("Control+A")
-        await page.keyboard.press("Backspace")
+
+        # Bersihkan jika ada draf teks terdahulu.
+        # Catatan: Control+A pada contenteditable sering hanya memilih baris/paragraf saat ini,
+        # bukan seluruh isi. Oleh karena itu, gunakan JS untuk memilih semua node,
+        # lalu tekan Backspace. Fallback: klik 3x (triple-click = select all paragraph).
+        try:
+            # Pendekatan utama: JS selectAll pada elemen yang difokuskan
+            await page.evaluate(
+                """() => {
+                    const el = document.activeElement;
+                    if (!el) return;
+                    const sel = window.getSelection();
+                    if (!sel) return;
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                }"""
+            )
+            await page.keyboard.press("Backspace")
+        except Exception:
+            # Fallback: triple-click + Backspace
+            try:
+                await textbox_loc.click(click_count=3, timeout=500)
+                await page.keyboard.press("Backspace")
+            except Exception:
+                await page.keyboard.press("Control+A")
+                await page.keyboard.press("Backspace")
         await page.wait_for_timeout(100)
 
         # Pisahkan per baris dan ketik dengan Shift+Enter agar rapat
@@ -252,13 +282,22 @@ async def type_post_caption(page: Page, text_content: str, worker_tag: str = "")
 async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str = "") -> bool:
     """
     Upload berkas gambar ke dalam modal dialog komposer via file input HTML5 tersembunyi.
+
+    Strategi:
+    1. Validasi file (ada, ukuran <= MAX_MEDIA_SIZE_MB).
+    2. Cari file input tersembunyi di DOM. Jika tidak ada, klik tombol Photo/video.
+    3. Coba set_input_files pada file input.
+    4. Fallback: pakai page.expect_file_chooser() + klik tombol photo.
     """
     if not image_paths:
         return True
 
-    valid_paths = [p for p in image_paths if os.path.exists(p)]
+    # 1. Validate file paths & sizes
+    valid_paths, skipped = validate_media_files(image_paths)
+    for path, reason in skipped:
+        log(f"   ⚠️ Media diskip: {os.path.basename(path)} ({reason})", worker_tag)
     if not valid_paths:
-        log("   ⚠️ Berkas gambar tidak ditemukan di disk.", worker_tag)
+        log("   ⚠️ Tidak ada berkas gambar valid untuk diunggah.", worker_tag)
         return False
 
     log(f"   🖼️  Mengunggah {len(valid_paths)} berkas gambar...", worker_tag)
@@ -267,20 +306,23 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
         log("   ❌ Modal komposer tidak aktif. Upload dibatalkan.", worker_tag)
         return False
 
-    # 1. Aktifkan area photo/video jika file input belum ter-render di DOM
+    # 2. Aktifkan area photo/video jika file input belum ter-render di DOM
     file_input = page.locator('div[role="dialog"] input[type="file"]').first
-    if await file_input.count() == 0:
-        for photo_sel in PHOTO_BUTTON_SELECTORS:
-            try:
-                p_btn = page.locator(photo_sel).first
-                if await p_btn.count() > 0 and await p_btn.is_visible(timeout=500):
-                    await p_btn.click(timeout=1500)
-                    await page.wait_for_timeout(1000)
-                    break
-            except Exception:
-                continue
+    try:
+        if await file_input.count() == 0:
+            for photo_sel in PHOTO_BUTTON_SELECTORS:
+                try:
+                    p_btn = page.locator(photo_sel).first
+                    if await p_btn.count() > 0 and await p_btn.is_visible(timeout=500):
+                        await p_btn.click(timeout=1500)
+                        await page.wait_for_timeout(1000)
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
 
-    # 2. Cari file input di dalam modal dialog atau form
+    # 3. Cari file input di dalam modal dialog atau form
     file_input_loc = None
     for sel in FILE_INPUT_SELECTORS:
         try:
@@ -291,17 +333,46 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
         except Exception:
             continue
 
+    # 4a. Pendekatan utama: set_input_files pada elemen input tersembunyi
     if file_input_loc:
         try:
             await file_input_loc.set_input_files(valid_paths)
             # Menunggu rendering pratinjau gambar oleh Facebook
             await page.wait_for_timeout(3000)
-            log("   ✅ Berkas gambar berhasil diunggah!", worker_tag)
+            log("   ✅ Berkas gambar berhasil diunggah via input!", worker_tag)
             return True
         except Exception as e:
-            log(f"   ❌ Gagal upload file gambar: {e}", worker_tag)
+            log(f"   ⚠️ Gagal upload via set_input_files: {e}. Mencoba fallback filechooser...", worker_tag)
 
-    log("   ⚠️ Elemen input file tidak ditemukan di komposer.", worker_tag)
+    # 4b. Fallback: gunakan page.expect_file_chooser() + klik tombol photo
+    # Pendekatan ini bekerja untuk layout FB yang file input-nya tidak terlihat/tidak bisa diakses.
+    try:
+        # Cari tombol photo/video yang bisa diklik
+        photo_btn = None
+        for photo_sel in PHOTO_BUTTON_SELECTORS:
+            try:
+                p_btn = page.locator(photo_sel).first
+                if await p_btn.count() > 0 and await p_btn.is_visible(timeout=500):
+                    photo_btn = p_btn
+                    break
+            except Exception:
+                continue
+
+        if photo_btn:
+            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                try:
+                    await photo_btn.click(timeout=2000)
+                except Exception:
+                    await photo_btn.click(force=True, timeout=2000)
+            file_chooser = await fc_info
+            await file_chooser.set_files(valid_paths)
+            await page.wait_for_timeout(3000)
+            log("   ✅ Berkas gambar berhasil diunggah via filechooser fallback!", worker_tag)
+            return True
+    except Exception as e:
+        log(f"   ❌ Fallback filechooser juga gagal: {e}", worker_tag)
+
+    log("   ⚠️ Elemen input file tidak ditemukan di komposer & fallback gagal.", worker_tag)
     return False
 
 
@@ -360,16 +431,26 @@ async def submit_group_post(page: Page, worker_tag: str = "") -> bool:
                     log("   ⏳ Postingan terkirim dan Menunggu Persetujuan Admin (Pending Approval).", worker_tag)
                     return True
 
-        # Pemicu cadangan: tekan Control+Enter pada textbox caption di dalam modal dialog
+        # Pemicu cadangan: tekan Control+Enter pada textbox caption di dalam modal dialog.
+        # Pastikan textbox benar-benar difokuskan dan masih aktif (modal belum tertutup).
         log("   🔄 Menggunakan pemicu cadangan (Control+Enter)...", worker_tag)
-        tb = await find_caption_textbox(page)
-        if tb:
-            try:
-                await tb.focus()
-                await page.keyboard.press("Control+Enter")
-                await page.wait_for_timeout(4000)
-            except Exception:
-                pass
+        if await is_composer_active(page):
+            tb = await find_caption_textbox(page)
+            if tb:
+                try:
+                    # Klik dulu supaya yakin fokus di textbox (bukan di tombol lain)
+                    try:
+                        await tb.click(timeout=1000)
+                    except Exception:
+                        await tb.focus()
+                    await page.wait_for_timeout(200)
+                    await page.keyboard.press("Control+Enter")
+                    await page.wait_for_timeout(4000)
+                except Exception as e:
+                    log(f"   ⚠️ Control+Enter fallback gagal: {e}", worker_tag)
+        else:
+            # Modal sudah tertutup sejak pengecekan terakhir — mungkin post sudah berhasil
+            log("   ℹ️ Modal komposer sudah tertutup — kemungkinan post sudah terkirim.", worker_tag)
 
         if not await is_composer_active(page):
             log("   ✅ Postingan BERHASIL terpublikasi via pemicu cadangan!", worker_tag)

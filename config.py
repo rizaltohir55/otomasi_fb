@@ -45,6 +45,57 @@ AUTO_LIKE_ENABLED: bool    = False
 AUTO_COMMENT_ENABLED: bool = False
 AUTO_COMMENTS: list[str]   = ["Gasken", "Ready", "Inbox", "Up", "Mantap"]
 
+# ── Robustness & Anti-Ban Tunables ───────────────────────────────────────────
+# Saat akun terdeteksi RESTRICTED, beri waktu cooldown (detik) sebelum akun
+# tersebut boleh dipakai kembali oleh worker lain. Default 30 menit.
+RESTRICTION_COOLDOWN_SEC: int = 30 * 60
+
+# File persistent skip-list: grup yang sudah pernah gagal/gagal berulang tidak
+# di-retry pada sesi berikutnya. "" = fitur dimatikan.
+GROUP_SKIP_FILE: str = os.path.join(BASE_DIR, "data", "group_skip_list.txt")
+
+# Berapa kali retry maksimal per grup sebelum dianggap gagal permanen.
+MAX_RETRY_PER_GROUP: int = 1
+
+# Setelah submit Join, polling status maksimal selama berapa detik.
+JOIN_POLL_MAX_SEC: int = 10
+
+# Ukuran media maksimum (MB). File yang melebihi akan di-skip dengan peringatan.
+MAX_MEDIA_SIZE_MB: int = 4
+
+# Jeda acak (detik) saat startup multi-worker agar tidak semua akun membuka FB
+# bersamaan dari IP yang sama (mengurangi risiko bot detection).
+WORKER_STARTUP_JITTER_MIN: float = 1.5
+WORKER_STARTUP_JITTER_MAX: float = 5.0
+
+# Pool jawaban pertanyaan admin grup — dipilih acak supaya tidak terlihat spam.
+# Jika grup menanyakan lebih dari 1 pertanyaan, jawaban berbeda dipakai per pertanyaan.
+JOIN_QA_ANSWER_POOL: list[str] = [
+    "Setuju dengan aturan grup",
+    "Saya baca dan setuju aturan",
+    "Insya Allah taat aturan",
+    "Mohon izin gabung, saya setuju",
+    "Saya sudah paham aturan grup",
+]
+
+# Teks yang menandakan halaman checkpoint / 2FA / verifikasi identitas FB.
+CHECKPOINT_INDICATOR_TEXTS: list[str] = [
+    "two-factor authentication",
+    "verifikasi dua langkah",
+    "enter login code",
+    "masukkan kode login",
+    "save your login info",
+    "simpan info login anda",
+    "verify it's you",
+    "verifikasi bahwa ini adalah anda",
+    "confirm your identity",
+    "konfirmasi identitas anda",
+    "upload a photo of yourself",
+    "unggah foto anda",
+    "identify friends",
+    "identifikasi teman",
+]
+
 # ── Multi-Account Execution & Concurrency ──────────────────────────────────────
 MAX_CONCURRENT_WORKERS: int      = 3
 WORKER_STAGGER_DELAY_SEC: float  = 3.0
@@ -300,6 +351,9 @@ RESTRICTION_TEXTS = [
     "fitur ini dibatasi",
     "aktivitas anda dibatasi",
     "batas sementara",
+    "akun Anda ditangguhkan",
+    "Anda tidak dapat mengomentari",
+    "fitur grup ditangguhkan",
     "you can't post right now",
     "you can't post to groups",
     "you're temporarily blocked",
@@ -308,5 +362,15 @@ RESTRICTION_TEXTS = [
     "feature restricted",
     "action blocked",
     "temporarily restricted",
+    "your account has been temporarily restricted",
+    "you've been temporarily blocked",
+    "we restrict certain activity",
+    "pending review",
+    "we've restricted",
+    "limited access",
+    "account suspended",
+    "feature suspended",
+    "we've temporarily limited",
+    "akun ditangguhkan sementara",
 ]
 

@@ -3,6 +3,7 @@ engine/joiner.py
 Modul Otomasi Bergabung Ke Grup Facebook (Auto Join Group Engine).
 """
 import re
+import random
 import asyncio
 from typing import Tuple, Optional
 from playwright.async_api import Page, Locator
@@ -11,7 +12,7 @@ import config
 from utils.helpers import log, normalize_group_url
 from utils.browser import random_human_delay, safe_goto
 from engine.dom_analyzer import dismiss_all_overlays
-from engine.browser import verify_login_status, check_account_restriction
+from engine.browser import verify_login_status, check_account_restriction, is_on_checkpoint_page
 from engine.selectors import (
     JOIN_GROUP_SELECTORS,
     JOINED_INDICATOR_SELECTORS,
@@ -50,6 +51,11 @@ async def check_membership_status(page: Page, target_url: str, worker_tag: str =
 
     # 2. Cek jika terlempar ke halaman login / checkpoint
     if "login" in page.url.lower() or "checkpoint" in page.url.lower() or "recover" in page.url.lower():
+        return "NOT_LOGGED_IN"
+
+    # 2b. Cek halaman checkpoint (2FA, "verify it's you") walaupun URL tidak mengandung kata kunci
+    if await is_on_checkpoint_page(page):
+        log(f"   🔐 Halaman CHECKPOINT terdeteksi (2FA / verifikasi identitas).", worker_tag)
         return "NOT_LOGGED_IN"
 
     is_logged_in = await verify_login_status(page)
@@ -162,22 +168,32 @@ async def handle_join_confirmation_modals(page: Page, worker_tag: str = "") -> b
                 return False
 
             # 2. Isi pertanyaan keanggotaan admin grup (textarea, input, contenteditable)
+            # Jawaban diacak dari pool supaya tidak terdeteksi spam oleh FB.
             textareas = d.locator('textarea, input[type="text"], div[role="textbox"][contenteditable="true"]')
             ta_count = await textareas.count()
             if ta_count > 0:
                 log(f"   📋 Mengisi {ta_count} pertanyaan keanggotaan admin grup...", worker_tag)
+                # Siapkan pool jawaban yang cukup untuk jumlah pertanyaan (acak tanpa pengulangan)
+                qa_pool = list(config.JOIN_QA_ANSWER_POOL)
+                random.shuffle(qa_pool)
                 for j in range(ta_count):
                     ta = textareas.nth(j)
-                    if await ta.is_visible(timeout=300):
+                    try:
+                        if not await ta.is_visible(timeout=300):
+                            continue
+                    except Exception:
+                        continue
+                    # Pilih jawaban: gunakan pool acak, ulang dari awal jika habis
+                    answer = qa_pool[j % len(qa_pool)] if qa_pool else "Setuju"
+                    try:
+                        await ta.click(timeout=500)
+                        await ta.fill(answer)
+                        await page.wait_for_timeout(300)
+                    except Exception:
                         try:
-                            await ta.click(timeout=500)
-                            await ta.fill("Setuju dengan aturan grup")
-                            await page.wait_for_timeout(300)
+                            await ta.press_sequentially(answer, delay=10)
                         except Exception:
-                            try:
-                                await ta.press_sequentially("Setuju dengan aturan grup", delay=10)
-                            except Exception:
-                                pass
+                            pass
 
             # 3. Tandai checkbox persetujuan aturan grup
             checkboxes = d.locator('input[type="checkbox"], div[role="checkbox"], label:has(input[type="checkbox"])')
@@ -354,19 +370,36 @@ async def execute_join_group(page: Page, target_url: str, worker_tag: str = "") 
     # Tangani modal konfirmasi / pertanyaan jika ada
     await handle_join_confirmation_modals(page, worker_tag)
 
-    # Dynamic polling hingga 5 detik untuk pembaruan status pasca-klik
+    # Dynamic polling untuk pembaruan status pasca-klik.
+    # Beberapa grup Q&A berat bisa memakan waktu 8-10 detik sebelum status berubah,
+    # jadi gunakan JOIN_POLL_MAX_SEC dari config (default 10s) sebagai batas atas.
+    poll_max_sec = max(5, getattr(config, "JOIN_POLL_MAX_SEC", 10))
+    poll_iterations = poll_max_sec
     new_status = "UNKNOWN"
-    for _ in range(5):
+    for _ in range(poll_iterations):
         await page.wait_for_timeout(1000)
-        new_status = await check_membership_status(page, target_url, worker_tag)
-        if new_status in ["JOINED", "PENDING"]:
+        # Cek pembatasan akun terlebih dahulu — kalau restricted, hentikan polling
+        is_res, _ = await check_account_restriction(page)
+        if is_res:
+            new_status = "RESTRICTED"
             break
+        new_status = await check_membership_status(page, target_url, worker_tag)
+        if new_status in ["JOINED", "PENDING", "RESTRICTED", "NOT_LOGGED_IN"]:
+            break
+
+    if new_status == "RESTRICTED":
+        log(f"   ⛔ Akun terkena pembatasan FB saat join grup. Menghentikan proses.", worker_tag)
+        return False
+
+    if new_status == "NOT_LOGGED_IN":
+        log(f"   🔐 Sesi login terputus saat join grup. Menghentikan proses.", worker_tag)
+        return False
 
     if new_status in ["JOINED", "PENDING"]:
         log(f"   ✅ Berhasil bergabung ke grup! Status saat ini: {new_status}", worker_tag)
         return True
     else:
-        # Re-check modal sekali lagi
+        # Re-check modal sekali lagi — bisa jadi modal Q&A baru muncul setelah polling awal
         if await handle_join_confirmation_modals(page, worker_tag):
             await page.wait_for_timeout(2000)
             new_status = await check_membership_status(page, target_url, worker_tag)

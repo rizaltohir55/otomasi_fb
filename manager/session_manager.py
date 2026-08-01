@@ -20,9 +20,13 @@ from engine.browser import get_session_info, save_session_state
 def discover_all_sessions() -> List[Dict[str, str]]:
     """
     Cari seluruh file sesi JSON yang tersimpan di folder session/ maupun di root directory.
+
+    Memvalidasi bahwa setiap sesi memiliki cookie `c_user` DAN `xs` (keduanya wajib
+    untuk otentikasi FB yang valid). Sesi tanpa `xs` tetap dikembalikan tetapi ditandai
+    `xs_present=False` agar UI bisa memperingatkan user.
     """
     session_files = []
-    
+
     # 1. Root directory session files
     root_files = glob.glob(os.path.join(config.BASE_DIR, "*.json"))
     for f in root_files:
@@ -42,6 +46,14 @@ def discover_all_sessions() -> List[Dict[str, str]]:
     for sp in unique_paths:
         info = get_session_info(sp)
         if info["c_user"]:
+            # Tambahkan flag xs_present
+            try:
+                with open(sp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cookies = data.get("cookies", [])
+                info["xs_present"] = any(c.get("name") == "xs" for c in cookies)
+            except Exception:
+                info["xs_present"] = False
             sessions_data.append(info)
 
     return sessions_data
@@ -303,9 +315,16 @@ async def verify_session_live_status(session_file: str) -> Dict[str, Any]:
                         return "RESTRICTED", "Akun Dibatasi FB (Restricted)"
                     else:
                         return "ACTIVE", "Sesi Aktif & Terverifikasi"
+            except urllib.error.HTTPError as he:
+                # HTTP 4xx/5xx — sesi mungkin valid tapi FB menolak request ini.
+                # Jangan false-positive ACTIVE; kembalikan UNKNOWN.
+                return "UNKNOWN", f"HTTP {he.code} — sesi tidak dapat diverifikasi"
+            except urllib.error.URLError as ue:
+                # Network error (DNS, timeout, refused) — tidak bisa memastikan status sesi.
+                return "UNKNOWN", f"Network error: {ue.reason}"
             except Exception as e:
-                # Jika koneksi timeout / HTTP error, tetap return ACTIVE jika cookie c_user & xs valid di file
-                return "ACTIVE", "Sesi Aktif (Cookie Local Valid)"
+                # Exception tak terduga lain — konservatif: UNKNOWN, bukan ACTIVE.
+                return "UNKNOWN", f"Error tidak terduga: {e}"
 
         status, msg = await asyncio.to_thread(http_check)
         result["status"] = status

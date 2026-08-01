@@ -7,6 +7,7 @@ import os
 import sys
 import glob
 import json
+import time
 import asyncio
 import shutil
 import threading
@@ -39,7 +40,20 @@ from manager.session_manager import (
     verify_session_live_status,
 )
 from engine.collector import load_groups, load_caption, find_media_images
-from manager.runner import launch_multiprocess_runner, worker_loop, run_worker_entry
+from manager.runner import (
+    launch_multiprocess_runner,
+    worker_loop,
+    run_worker_entry,
+    validate_mode,
+    VALID_MODES,
+    MODE_TEXT,
+)
+from utils.retry import (
+    trigger_global_cancel,
+    reset_global_cancel,
+    restriction_cooldown,
+    group_skip_list,
+)
 
 app = FastAPI(
     title="FB AutoEngine 3.0 Ultra - Web Control Center",
@@ -390,7 +404,9 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
                 except Exception as e:
                     err_msg = str(e) or type(e).__name__
                     log(f"   ⚠️ [{sname}] Warning saat cek posting: {err_msg}")
-                    return {"path": spath, "name": sname, "status": "ACTIVE", "message": "Akun Aktif"}
+                    # Konservatif: jangan return "ACTIVE" kalau belum sempat verifikasi.
+                    # Hanya return ACTIVE kalau sudah lolos semua cek restriction di atas.
+                    return {"path": spath, "name": sname, "status": "UNKNOWN", "message": f"Tidak dapat diverifikasi: {err_msg}"}
                 finally:
                     try:
                         if context: await context.close()
@@ -652,10 +668,19 @@ async def start_runner(req: StartRunnerRequest, background_tasks: BackgroundTask
     if not req.selected_sessions:
         raise HTTPException(status_code=400, detail="Harap pilih minimal 1 sesi akun Facebook.")
 
+    # Validasi mode input sebelum spawn worker apapun
+    try:
+        validate_mode(req.mode)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    # Reset cancellation token dari sesi sebelumnya
+    reset_global_cancel()
+
     task = asyncio.create_task(async_runner_wrapper(req))
     runner_state.current_task = task
-    
-    return {"status": "success", "message": f"Otomasi dimulai untuk {len(req.selected_sessions)} akun."}
+
+    return {"status": "success", "message": f"Otomasi dimulai untuk {len(req.selected_sessions)} akun (Mode: {MODE_TEXT.get(req.mode, req.mode)})."}
 
 
 @app.get("/api/runner/live-status")
@@ -667,19 +692,90 @@ async def get_runner_live_status():
     }
 
 
+@app.get("/api/runner/skip-list")
+async def get_group_skip_list():
+    """Lihat daftar hitam grup yang ditandai gagal persisten."""
+    items = group_skip_list.list_all()
+    return {
+        "status": "success",
+        "count": len(items),
+        "skip_list": [{"url": k, "reason": v} for k, v in items.items()],
+    }
+
+
+@app.delete("/api/runner/skip-list")
+async def clear_group_skip_list():
+    """Bersihkan seluruh isi skip-list (mulai dari nol)."""
+    group_skip_list.clear()
+    log("🧹 Group skip-list dibersihkan via web interface.")
+    return {"status": "success", "message": "Skip-list dibersihkan."}
+
+
+@app.get("/api/runner/cooldown")
+async def get_restriction_cooldown():
+    """Lihat daftar akun yang sedang dalam cooldown RESTRICTED."""
+    snapshot = restriction_cooldown.snapshot()
+    return {
+        "status": "success",
+        "count": len(snapshot),
+        "cooldown": [
+            {"c_user": k, "expires_at": v, "remaining_sec": max(0.0, v - time.time())}
+            for k, v in snapshot.items()
+        ],
+    }
+
+
+@app.delete("/api/runner/cooldown")
+async def clear_restriction_cooldown(c_user: Optional[str] = None):
+    """Bersihkan cooldown untuk satu akun (c_user) atau seluruhnya."""
+    if c_user:
+        restriction_cooldown.clear(c_user)
+        log(f"🛡️ Cooldown RESTRICTED dibersihkan untuk c_user={c_user}.")
+        return {"status": "success", "message": f"Cooldown dibersihkan untuk {c_user}."}
+    restriction_cooldown.clear()
+    log("🛡️ Seluruh cooldown RESTRICTED dibersihkan.")
+    return {"status": "success", "message": "Seluruh cooldown dibersihkan."}
+
+
 @app.post("/api/runner/stop")
 async def stop_runner():
     if not runner_state.is_running:
         return {"status": "success", "message": "Tidak ada otomasi yang sedang berjalan."}
 
+    # 1. Trigger cooperative cancellation — worker_loop akan cek token & keluar halus.
+    trigger_global_cancel()
+    log("🛑 Web Interface: Sinyal pembatalan kooperatif dikirim ke worker.")
+
+    # 2. Cancel asyncio task sebagai fallback (akan raise CancelledError di worker_loop).
+    cancelled_via_task = False
     if runner_state.current_task and not runner_state.current_task.done():
-        runner_state.current_task.cancel()
-        
+        try:
+            runner_state.current_task.cancel()
+            cancelled_via_task = True
+        except Exception:
+            pass
+
+    # 3. Tunggu sebentar (max 3 detik) supaya worker sempat save session & close browser.
+    if runner_state.current_task:
+        try:
+            await asyncio.wait_for(runner_state.current_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            log("⚠️ Worker tidak merespons pembatalan dalam 3 detik. Force-stop.")
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
     runner_state.is_running = False
     runner_state.last_status = "ABORTED"
+    runner_state.active_sessions = []
     live_monitor.mark_completed("ABORTED oleh pengguna")
-    log("🛑 Web Interface: Sinyal pembatalan otomasi dikirim. Menghentikan worker...")
-    return {"status": "success", "message": "Sinyal pembatalan otomasi dikirim."}
+    log("✅ Otomasi dihentikan.")
+    return {
+        "status": "success",
+        "message": "Sinyal pembatalan otomasi dikirim. Worker akan berhenti dalam beberapa detik.",
+        "cancelled_via_task": cancelled_via_task,
+    }
 
 
 # ── Server-Sent Events (SSE) Real-Time Log Streaming ─────────────────────────
