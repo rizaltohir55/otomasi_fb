@@ -96,6 +96,63 @@ async def worker_loop(
     media_images = find_media_images()
 
     worker_groups = list(groups)
+    # Deduplikasi grup dalam sesi ini (jaga-jaga kalau ada duplikat dari caller)
+    seen_in_session = set()
+    deduped_groups = []
+    for g in worker_groups:
+        if g not in seen_in_session:
+            seen_in_session.add(g)
+            deduped_groups.append(g)
+    if len(deduped_groups) < len(worker_groups):
+        log(f"🧹 {len(worker_groups) - len(deduped_groups)} grup duplikat dihapus dalam sesi ini.", worker_tag)
+    worker_groups = deduped_groups
+
+    # ── Session progress tracking: skip grup yang sudah diproses dalam 1 jam terakhir ──
+    # Cegah duplikasi posting saat user klik Start berkali-kali.
+    # File: data/session_progress_{c_user}.json
+    # Format: { "url": timestamp } — entri >1 jam dianggap expired & dihapus.
+    progress_file = os.path.join(config.DATA_DIR, f"session_progress_{c_user_id or 'default'}.json")
+    processed_recently = set()
+    try:
+        if os.path.exists(progress_file):
+            import json as _json
+            with open(progress_file, "r", encoding="utf-8") as f:
+                progress_data = _json.load(f)
+            now = time.time()
+            # Hapus entri >1 jam, simpan yang masih valid
+            valid = {k: v for k, v in progress_data.items() if now - v < 3600}
+            processed_recently = set(valid.keys())
+            if len(processed_recently) > 0:
+                log(f"📊 {len(processed_recently)} grup sudah diproses dalam 1 jam terakhir — akan di-skip.", worker_tag)
+            # Update file dengan entri valid saja (cleanup expired)
+            if len(valid) < len(progress_data):
+                with open(progress_file, "w", encoding="utf-8") as f:
+                    _json.dump(valid, f, indent=2)
+    except Exception as e:
+        log(f"⚠️ Gagal membaca session progress: {e}", worker_tag)
+
+    # Filter grup yang sudah diproses baru-baru ini
+    before_count = len(worker_groups)
+    worker_groups = [g for g in worker_groups if g not in processed_recently]
+    skipped_progress = before_count - len(worker_groups)
+    if skipped_progress > 0:
+        log(f"⏭️ {skipped_progress} grup di-skip (sudah diproses dalam 1 jam terakhir). {len(worker_groups)} grup tersisa.", worker_tag)
+
+    if not worker_groups:
+        log(f"✅ Semua grup sudah diproses dalam 1 jam terakhir. Tidak ada yang perlu dilakukan.", worker_tag)
+        notify_status("COMPLETED", step_msg=f"Semua grup sudah diproses ({before_count} grup)")
+        return {
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": account_name,
+            "status": "ALREADY_DONE",
+            "success_count": 0,
+            "fail_count": 0,
+            "total_groups": before_count,
+            "duration_sec": round(time.time() - start_time, 1),
+            "spoof_info": spoof_info
+        }
+
     if randomize_groups:
         random.shuffle(worker_groups)
         log(f"🔀 Urutan posting grup DIAKAK (randomized) untuk [{worker_tag}].", worker_tag)
@@ -105,6 +162,25 @@ async def worker_loop(
     success_count = 0
     fail_count = 0
     worker_status = "SELESAI"
+
+    # Helper: simpan grup yang berhasil diproses ke session progress file
+    def mark_group_processed(g_url: str):
+        """Catat grup ke session progress file supaya tidak diulang dalam 1 jam."""
+        try:
+            import json as _json
+            data = {}
+            if os.path.exists(progress_file):
+                try:
+                    with open(progress_file, "r", encoding="utf-8") as f:
+                        data = _json.load(f)
+                except Exception:
+                    data = {}
+            data[g_url] = time.time()
+            os.makedirs(os.path.dirname(progress_file), exist_ok=True)
+            with open(progress_file, "w", encoding="utf-8") as f:
+                _json.dump(data, f, indent=2)
+        except Exception:
+            pass  # non-fatal: progress tracking gagal, lanjutkan
 
     def notify_status(
         status: str,
@@ -353,6 +429,7 @@ async def worker_loop(
                         if ok:
                             success_count += 1
                             notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Postingan berhasil dikirim!")
+                            mark_group_processed(group_url)  # cegah duplikasi posting
                             # Auto-comment hanya jika fitur diaktifkan di config
                             try:
                                 if config.AUTO_COMMENT_ENABLED or config.AUTO_LIKE_ENABLED:
@@ -396,6 +473,7 @@ async def worker_loop(
                         if ok:
                             success_count += 1
                             notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Berhasil kirim bergabung!")
+                            mark_group_processed(group_url)  # cegah duplikasi join
                         else:
                             fail_count += 1
                             group_skip_list.add(group_url, reason="join failed (mode 2)")

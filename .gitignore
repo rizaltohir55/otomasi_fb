@@ -31,3 +31,5 @@ env/
 
 # ── Playwright ────────────────────────────────────────────────────────────────
 .cache/ms-playwright/
+session_progress_
+data/session_progress_*.json
