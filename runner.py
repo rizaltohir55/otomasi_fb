@@ -8,7 +8,7 @@ import config
 from helpers import (log, get_c_user, get_account_name, pick_profile,
                      lock_acquire, lock_release, load_groups, load_caption,
                      find_media, discover_sessions, normalize_url)
-from browser import create_browser, save_session, is_logged_in, check_restriction, goto
+from browser import create_browser, save_session, is_logged_in, check_restriction, goto, human_activity
 from poster import post_to_group
 from joiner import check_membership, execute_join
 
@@ -353,8 +353,107 @@ def _mp_entry(sfile, groups, mode, tag, headless, randomize, rq):
 
 
 def run_single(sfile, groups, mode, tag="Worker", headless=True, randomize=True):
+    """Jalankan single worker dengan auto-loop session."""
     fix_encoding()
-    return asyncio.run(worker_loop(sfile, groups, mode, tag, headless, randomize))
+    asyncio.run(_auto_loop_single(sfile, groups, mode, tag, headless, randomize))
+
+
+async def _auto_loop_single(sfile, groups, mode, tag, headless, randomize):
+    """
+    Auto-loop: jalankan worker_loop, setelah selesai cek apakah masih ada
+    grup tersisa. Jika ya, jeda 30-60 menit dengan aktivitas manusia,
+    lalu lanjut otomatis. Tidak perlu jalankan main.py lagi.
+    """
+    loop_count = 0
+    total_ok = 0
+    total_fail = 0
+
+    while True:
+        loop_count += 1
+        log(f"\n{'='*60}")
+        log(f"🔄 SESSION #{loop_count} — {tag}")
+        log(f"{'='*60}")
+
+        # Cek max loops (0 = unlimited)
+        if config.SESSION_MAX_LOOPS > 0 and loop_count > config.SESSION_MAX_LOOPS:
+            log(f"🛑 Max loops ({config.SESSION_MAX_LOOPS}) tercapai. Stop.", tag)
+            break
+
+        # Jalankan worker_loop
+        result = await worker_loop(sfile, groups, mode, tag, headless, randomize)
+
+        status = result.get("status", "UNKNOWN")
+        ok = result.get("ok", 0)
+        fail = result.get("fail", 0)
+        total_ok += ok
+        total_fail += fail
+
+        # Jika error fatal / expired / locked → stop
+        if status in ["EXPIRED", "FATAL", "ERROR", "LOCKED", "COOLDOWN"]:
+            log(f"🛑 Stop auto-loop: {status}", tag)
+            break
+
+        # Jika semua grup sudah diproses → stop
+        if status == "DONE":
+            log(f"✅ Semua grup sudah diproses. Stop.", tag)
+            break
+
+        # Cek apakah masih ada grup yang belum diproses
+        c_user = get_c_user(sfile)
+        processed, prog_file = progress_load(c_user)
+        remaining = [g for g in groups if g not in processed and g not in skip_list_load()]
+
+        if not remaining:
+            log(f"✅ Semua {len(groups)} grup sudah diproses. Selesai!", tag)
+            break
+
+        # Masih ada grup tersisa → jeda + aktivitas manusia → loop lagi
+        break_sec = random.uniform(config.SESSION_BREAK_MIN, config.SESSION_BREAK_MAX)
+        log(f"\n{'='*60}")
+        log(f"⏸️ Session break: {break_sec:.0f}s ({break_sec/60:.0f} menit)", tag)
+        log(f"📊 Total sementara: {total_ok} OK | {total_fail} Gagal", tag)
+        log(f"📋 {len(remaining)} grup tersisa untuk session berikutnya", tag)
+        log(f"🧑 Browser tetap aktif — simulasi aktivitas manusia...", tag)
+        log(f"{'='*60}\n")
+
+        # Buka browser baru untuk aktivitas manusia (browser lama sudah ditutup di worker_loop)
+        async with async_playwright() as p:
+            try:
+                browser, context = await asyncio.wait_for(
+                    create_browser(p, sfile, headless=headless),
+                    timeout=90.0
+                )
+                page = await context.new_page()
+                await goto(page, "https://www.facebook.com/")
+
+                # Verifikasi login masih aktif
+                if await is_logged_in(page):
+                    # Lakukan aktivitas manusia selama jeda
+                    await human_activity(page, break_sec, tag)
+                else:
+                    log(f"❌ Sesi kedaluwarsa saat break. Stop.", tag)
+                    await browser.close()
+                    break
+
+                # Save session setelah aktivitas
+                try:
+                    await save_session(context, sfile, name if 'name' in dir() else get_account_name(sfile))
+                except Exception:
+                    pass
+
+                await browser.close()
+            except Exception as e:
+                log(f"⚠️ Error saat aktivitas break: {e}. Tunggu jeda tanpa browser.", tag)
+                await asyncio.sleep(break_sec)
+
+        log(f"\n{'='*60}")
+        log(f"▶️ Session #{loop_count + 1} dimulai...", tag)
+        log(f"{'='*60}")
+
+    # Final summary
+    log(f"\n{'='*60}")
+    log(f"📊 FINAL SUMMARY: {loop_count} sessions | {total_ok} OK | {total_fail} Gagal", tag)
+    log(f"{'='*60}")
 
 
 def run_multi(session_files, groups, mode="1", max_workers=None, headless=True, randomize=True):

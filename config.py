@@ -35,6 +35,11 @@ SKIP_FILE = os.path.join(DATA_DIR, "skip_list.txt")
 # Batas post per session — stop SEBELUM kena limit FB
 MAX_POST_PER_SESSION = 15  # FB mulai restriksi ~20 post, stop di 15 untuk aman
 
+# Auto-loop: setelah max post tercapai, jeda lalu lanjut otomatis
+SESSION_BREAK_MIN = 1800   # 30 menit jeda antar session
+SESSION_BREAK_MAX = 3600   # 60 menit jeda maksimal
+SESSION_MAX_LOOPS = 0      # 0 = unlimited (stop manual dengan Ctrl+C)
+
 # Break panjang setiap N grup (simulasi istirahat manusia)
 BREAK_EVERY_N = 8          # setiap 8 grup, ambil jeda panjang
 BREAK_MIN_SEC = 60         # jeda 60-180 detik (1-3 menit)

@@ -149,3 +149,92 @@ async def goto(page, url, timeout_ms=20000):
             return True
         except Exception:
             return False
+
+
+async def human_activity(page, duration_sec, tag=""):
+    """
+    Simulasi aktivitas manusia selama jeda panjang.
+    - Scroll feed grup/home secara natural
+    - Kadang buka notifikasi
+    - Kadang hover elemen
+    - Jeda acak antar aksi (5-20 detik)
+    """
+    import random
+    log(f"🧑 Aktivitas manusia selama {duration_sec:.0f}s...", tag)
+    end_time = time.time() + duration_sec
+
+    activities = [
+        "scroll_feed",
+        "scroll_feed",
+        "scroll_feed",  # lebih sering scroll
+        "open_notifications",
+        "open_home",
+        "hover_posts",
+    ]
+
+    while time.time() < end_time:
+        remaining = end_time - time.time()
+        if remaining < 10:
+            break
+
+        action = random.choice(activities)
+        try:
+            if action == "scroll_feed":
+                # Scroll feed secara natural (halaman saat ini)
+                scroll_steps = random.randint(3, 7)
+                for _ in range(scroll_steps):
+                    if time.time() >= end_time:
+                        break
+                    scroll_amount = random.randint(200, 600)
+                    await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                    await page.wait_for_timeout(random.randint(2000, 5000))
+                log(f"   📜 Scroll feed ({scroll_steps}x)", tag)
+
+            elif action == "open_notifications":
+                # Buka halaman notifikasi
+                await goto(page, "https://www.facebook.com/notifications/", timeout_ms=15000)
+                await page.wait_for_timeout(random.randint(3000, 8000))
+                # Scroll notifikasi
+                for _ in range(random.randint(2, 4)):
+                    if time.time() >= end_time:
+                        break
+                    await page.evaluate(f"window.scrollBy(0, {random.randint(200, 400)})")
+                    await page.wait_for_timeout(random.randint(2000, 4000))
+                log(f"   🔔 Baca notifikasi", tag)
+
+            elif action == "open_home":
+                # Buka home feed
+                await goto(page, "https://www.facebook.com/", timeout_ms=15000)
+                await page.wait_for_timeout(random.randint(3000, 8000))
+                # Scroll home feed
+                for _ in range(random.randint(3, 6)):
+                    if time.time() >= end_time:
+                        break
+                    await page.evaluate(f"window.scrollBy(0, {random.randint(300, 700)})")
+                    await page.wait_for_timeout(random.randint(2000, 5000))
+                log(f"   🏠 Baca home feed", tag)
+
+            elif action == "hover_posts":
+                # Hover pada elemen post di feed
+                try:
+                    posts = page.locator('div[role="article"]')
+                    cnt = await posts.count()
+                    if cnt > 0:
+                        idx = random.randint(0, min(cnt - 1, 5))
+                        post = posts.nth(idx)
+                        await post.hover(timeout=2000)
+                        await page.wait_for_timeout(random.randint(1000, 3000))
+                        log(f"   🖱️ Hover post #{idx}", tag)
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
+
+        # Jeda acak antar aktivitas (5-20 detik)
+        pause = random.randint(5, 20)
+        if time.time() + pause > end_time:
+            pause = max(1, int(end_time - time.time()))
+        await page.wait_for_timeout(pause * 1000)
+
+    log(f"✅ Aktivitas selesai", tag)
