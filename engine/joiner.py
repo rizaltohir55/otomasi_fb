@@ -41,7 +41,7 @@ async def check_membership_status(page: Page, target_url: str, worker_tag: str =
 
     if need_nav:
         await safe_goto(page, desktop_url, timeout_ms=20000)
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(500)
 
     # 1. Cek pembatasan akun (Restricted / Action Blocked)
     is_res, res_reason = await check_account_restriction(page)
@@ -250,7 +250,7 @@ async def handle_join_confirmation_modals(page: Page, worker_tag: str = "") -> b
                             await c_btn.click(timeout=2000)
                         except Exception:
                             await c_btn.click(force=True, timeout=2000)
-                        await page.wait_for_timeout(2000)
+                        await page.wait_for_timeout(500)
                         handled = True
                         break
                 except Exception:
@@ -269,7 +269,7 @@ async def handle_join_confirmation_modals(page: Page, worker_tag: str = "") -> b
                             if not any(cl in label or cl in txt for cl in ["close", "tutup", "cancel", "batal"]):
                                 log(f"   👉 Menekan tombol utama modal fallback ({txt or label})...", worker_tag)
                                 await mb.click(force=True, timeout=2000)
-                                await page.wait_for_timeout(2000)
+                                await page.wait_for_timeout(500)
                                 handled = True
                                 break
                 except Exception:
@@ -338,7 +338,7 @@ async def execute_join_group(page: Page, target_url: str, worker_tag: str = "") 
                 continue
 
     if not join_btn:
-        await page.wait_for_timeout(1200)
+        await page.wait_for_timeout(600)
         for text in config.JOIN_BUTTON_TEXTS:
             try:
                 loc_aria = page.locator(f'div[role="button"][aria-label="{text}"]')
@@ -359,11 +359,11 @@ async def execute_join_group(page: Page, target_url: str, worker_tag: str = "") 
             await join_btn.scroll_into_view_if_needed()
             await page.wait_for_timeout(300)
             await join_btn.click(timeout=3000)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(500)
         except Exception:
             try:
                 await join_btn.click(force=True, timeout=3000)
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(500)
             except Exception as e:
                 log(f"   ⚠️ Gagal klik tombol join utama: {e}", worker_tag)
 
@@ -377,7 +377,7 @@ async def execute_join_group(page: Page, target_url: str, worker_tag: str = "") 
     poll_iterations = poll_max_sec
     new_status = "UNKNOWN"
     for _ in range(poll_iterations):
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(500)
         # Cek pembatasan akun terlebih dahulu — kalau restricted, hentikan polling
         is_res, _ = await check_account_restriction(page)
         if is_res:
@@ -401,7 +401,7 @@ async def execute_join_group(page: Page, target_url: str, worker_tag: str = "") 
     else:
         # Re-check modal sekali lagi — bisa jadi modal Q&A baru muncul setelah polling awal
         if await handle_join_confirmation_modals(page, worker_tag):
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(500)
             new_status = await check_membership_status(page, target_url, worker_tag)
 
         if new_status in ["JOINED", "PENDING"]:

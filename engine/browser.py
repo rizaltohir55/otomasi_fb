@@ -320,7 +320,7 @@ async def handle_profile_selector_page(page: Page, worker_tag: str = "") -> bool
                 btn = page.locator(sel).first
                 if await btn.count() > 0 and await btn.is_visible(timeout=500):
                     await btn.click(timeout=2000)
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(500)
                     log("   ✅ Berhasil klik 'Lanjutkan' di profile-selector.", worker_tag)
                     return True
             except Exception:

@@ -68,7 +68,7 @@ async def post_comment_on_article(page: Page, article_locator: Locator, comment_
             ).first
             if await cmt_btn.count() > 0 and await cmt_btn.is_visible(timeout=500):
                 await cmt_btn.click()
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(500)
                 comment_box = article_locator.locator('div[role="textbox"][contenteditable="true"]').first
 
         if comment_box and await comment_box.count() > 0:
@@ -76,7 +76,7 @@ async def post_comment_on_article(page: Page, article_locator: Locator, comment_
             await page.wait_for_timeout(300)
             await comment_box.press_sequentially(comment_text, delay=config.TYPING_SPEED_MS)
             await page.keyboard.press("Enter")
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(500)
             log(f"   💬 Komentar '{comment_text}' berhasil terkirim!")
             return True
     except Exception as e:

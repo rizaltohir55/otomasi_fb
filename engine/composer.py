@@ -181,7 +181,7 @@ async def handle_anonymous_post_modal(page: Page, worker_tag: str = "") -> bool:
                 ).first
                 if await btn.count() > 0 and await btn.is_visible(timeout=800):
                     await btn.click()
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(800)
                     log("   ✅ Modal 'Postingan anonim' dikonfirmasi!", worker_tag)
                     return True
     except Exception:
@@ -271,7 +271,7 @@ async def open_group_composer(page: Page, target_url: str, worker_tag: str = "")
                 if await disc_tab.count() > 0 and await disc_tab.is_visible(timeout=300):
                     log("   ℹ️ Berpindah ke tab 'Diskusi' / 'Discussion' grup Jual Beli...", worker_tag)
                     await disc_tab.click(timeout=1500)
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(800)  # was 1500
                     trigger_loc = await find_composer_trigger(page)
                     if trigger_loc:
                         break
@@ -284,7 +284,7 @@ async def open_group_composer(page: Page, target_url: str, worker_tag: str = "")
             disc_url = f"https://www.facebook.com/groups/{gid}/discussion/"
             log(f"   🔄 Mencoba navigasi langsung ke URL Diskusi: {disc_url}", worker_tag)
             await page.goto(disc_url, timeout=config.NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(800)  # was 1500
             await dismiss_all_overlays(page)
             trigger_loc = await find_composer_trigger(page)
         except Exception:
@@ -297,7 +297,7 @@ async def open_group_composer(page: Page, target_url: str, worker_tag: str = "")
                 await trigger_loc.click(timeout=2000)
             except Exception:
                 await trigger_loc.click(force=True, timeout=2000)
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(600)
             await handle_anonymous_post_modal(page, worker_tag)
             if await is_composer_active(page):
                 log("   ✅ Komposer berhasil terbuka via Dynamic ARIA Analyzer!", worker_tag)
@@ -314,7 +314,7 @@ async def open_group_composer(page: Page, target_url: str, worker_tag: str = "")
                     await loc.click(timeout=2000)
                 except Exception:
                     await loc.click(force=True, timeout=2000)
-                await page.wait_for_timeout(1200)
+                await page.wait_for_timeout(600)
                 await handle_anonymous_post_modal(page, worker_tag)
                 if await is_composer_active(page):
                     log("   ✅ Komposer berhasil terbuka via selector registry!", worker_tag)
@@ -438,7 +438,7 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
                     p_btn = page.locator(photo_sel).first
                     if await p_btn.count() > 0 and await p_btn.is_visible(timeout=500):
                         await p_btn.click(timeout=1500)
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(500)
                         break
                 except Exception:
                     continue
@@ -461,7 +461,7 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
         try:
             await file_input_loc.set_input_files(valid_paths)
             # Menunggu rendering pratinjau gambar oleh Facebook
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(800)
             log("   ✅ Berkas gambar berhasil diunggah via input!", worker_tag)
             return True
         except Exception as e:
@@ -489,7 +489,7 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
                     await photo_btn.click(force=True, timeout=2000)
             file_chooser = await fc_info
             await file_chooser.set_files(valid_paths)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(800)
             log("   ✅ Berkas gambar berhasil diunggah via filechooser fallback!", worker_tag)
             return True
     except Exception as e:
@@ -565,7 +565,7 @@ async def submit_group_post(page: Page, worker_tag: str = "") -> Tuple[bool, str
 
         # Polling hingga 10 detik untuk sinyal sukses / pending / failure
         for _ in range(10):
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(500)
 
             # (a) Komposer tertutup = sukses
             if not await is_composer_active(page):

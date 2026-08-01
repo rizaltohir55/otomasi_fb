@@ -221,7 +221,7 @@ async def interactive_login_new_account(account_tag: Optional[str] = None) -> st
                     log(f"   ⏳ Menunggu login... {remaining}s tersisa")
 
             if logged_in:
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(500)
                 await save_session_state(context, target_path, name=account_tag)
                 log(f"   🎉 Login BERHASIL! Sesi disimpan ke: {target_path}")
                 await browser.close()
@@ -320,7 +320,7 @@ async def relogin_existing_account(session_file: str) -> bool:
                     log(f"   ⏳ Menunggu relogin... {remaining}s tersisa")
 
             if logged_in:
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(500)
                 await save_session_state(context, session_file, name=curr_name)
                 log(f"   🎉 Sesi {curr_name} BERHASIL diperbarui & disimpan!")
                 await browser.close()

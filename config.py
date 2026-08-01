@@ -34,11 +34,13 @@ DEFAULT_HEADLESS: bool = True
 PREFERRED_MODE: str    = "desktop"  # Pure Desktop React ARIA Engine
 
 # Timing settings (detik/milidetik)
-DELAY_BETWEEN_GROUPS_MIN: float = 2.0
-DELAY_BETWEEN_GROUPS_MAX: float = 4.0
-TYPING_SPEED_MS: int            = 5
-NAVIGATION_TIMEOUT_MS: int      = 45000
-ELEMENT_TIMEOUT_MS: int         = 5000
+# Dioptimalkan untuk kecepatan: delay lebih singkat, navigasi lebih cepat.
+# Trade-off: sedikit lebih tinggi risiko deteksi bot, tapi 2-3x lebih cepat.
+DELAY_BETWEEN_GROUPS_MIN: float = 1.0   # was 2.0
+DELAY_BETWEEN_GROUPS_MAX: float = 2.0   # was 4.0
+TYPING_SPEED_MS: int            = 3     # was 5 (lebih cepat ketik)
+NAVIGATION_TIMEOUT_MS: int      = 30000 # was 45000
+ELEMENT_TIMEOUT_MS: int         = 3000  # was 5000
 
 # Feature Switches
 AUTO_LIKE_ENABLED: bool    = False
@@ -58,15 +60,17 @@ GROUP_SKIP_FILE: str = os.path.join(BASE_DIR, "data", "group_skip_list.txt")
 MAX_RETRY_PER_GROUP: int = 1
 
 # Setelah submit Join, polling status maksimal selama berapa detik.
-JOIN_POLL_MAX_SEC: int = 10
+# Dioptimalkan: 7s cukup untuk deteksi status (was 10s).
+JOIN_POLL_MAX_SEC: int = 7
 
 # Ukuran media maksimum (MB). File yang melebihi akan di-skip dengan peringatan.
 MAX_MEDIA_SIZE_MB: int = 4
 
 # Jeda acak (detik) saat startup multi-worker agar tidak semua akun membuka FB
 # bersamaan dari IP yang sama (mengurangi risiko bot detection).
-WORKER_STARTUP_JITTER_MIN: float = 1.5
-WORKER_STARTUP_JITTER_MAX: float = 5.0
+# Dioptimalkan: jitter lebih singkat untuk startup lebih cepat.
+WORKER_STARTUP_JITTER_MIN: float = 0.5  # was 1.5
+WORKER_STARTUP_JITTER_MAX: float = 2.0  # was 5.0
 
 # Pool jawaban pertanyaan admin grup — dipilih acak supaya tidak terlihat spam.
 # Jika grup menanyakan lebih dari 1 pertanyaan, jawaban berbeda dipakai per pertanyaan.
