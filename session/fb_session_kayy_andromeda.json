@@ -131,21 +131,11 @@
       "sameSite": "None"
     },
     {
-      "name": "fr",
-      "value": "0wVf4vONh6eP4555t.AWcdUfX5sSgaq2ddr-lThVjgFXBihXcgaWWz4mk6o7na-ZmK4bM.BqZ7VJ..AAA.0.0.BqbanQ.AWfLy7WB46GBsheoIFekyAHNGc4",
-      "domain": ".facebook.com",
-      "path": "/",
-      "expires": 1793347792.305186,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "wd",
       "value": "1536x864",
       "domain": ".facebook.com",
       "path": "/",
-      "expires": 1786176594,
+      "expires": 1786181003,
       "httpOnly": false,
       "secure": true,
       "sameSite": "Lax"
@@ -155,14 +145,24 @@
       "value": "1.25",
       "domain": ".facebook.com",
       "path": "/",
-      "expires": 1786176594,
+      "expires": 1786181003,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
+      "name": "fr",
+      "value": "0wVf4vONh6eP4555t.AWcYsBUquq7uNzn9ez5MeKKB0gzCACb7nDgtu7V5H4KRytQrt8k.BqZ7VJ..AAA.0.0.BqbbsF.AWfDAqBqhV8YlLASSV6oyHHBof0",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1793352197.710978,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
       "name": "presence",
-      "value": "C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1785571795213%2C%22v%22%3A1%7D",
+      "value": "C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1785576204423%2C%22v%22%3A1%7D",
       "domain": ".facebook.com",
       "path": "/",
       "expires": -1,
@@ -176,16 +176,36 @@
       "origin": "https://www.facebook.com",
       "localStorage": [
         {
+          "name": "mw_encrypted_backups_restore_upsell_first_impression_time_key",
+          "value": "1785571793590"
+        },
+        {
+          "name": "screen_time_event_log_61592303773066_k5we2n",
+          "value": "{\"actorId\":\"61592303773066\",\"events\":[{\"data\":\"comet.home\",\"tabID\":\"k5we2n\",\"timestampMs\":1785576198990,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[[\"k5we2n\",1785576198990]],\"continuousScreenTimeMs\":0,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":{\"data\":\"comet.home\",\"tabID\":\"k5we2n\",\"timestampMs\":1785576198990,\"type\":102},\"currentIntervalStartModule\":\"comet.home\",\"currentIntervalStartMs\":1785576198990,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576198990|k5we2n|102|comet.home\",\"lastEventTimestampMs\":1785576198990,\"onReachRescheduleBaselineMs\":0,\"status\":\"active\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576198990|k5we2n|102|comet.home\",\"lastEventTimestampMs\":1785576198990,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]},{\"data\":\"comet.home\",\"tabID\":\"k5we2n\",\"timestampMs\":1785576201339,\"type\":101,\"sessionAfter\":[[1,{\"activeTabs\":[],\"continuousScreenTimeMs\":2349,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576201339|k5we2n|101|comet.home\",\"lastEventTimestampMs\":1785576201339,\"onReachRescheduleBaselineMs\":0,\"status\":\"inactive\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576201339|k5we2n|101|comet.home\",\"lastEventTimestampMs\":1785576201339,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]}]}"
+        },
+        {
+          "name": "Session",
+          "value": "kx6syg:1785576255376"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1785571795224.4001"
+        },
+        {
           "name": "screen_time_period_logging_facebook",
-          "value": "{\"actorId\":\"61592303773066\",\"currentIntervalLastTick\":1785571793,\"currentIntervalStart\":1785571793,\"initRemoteAgg\":{\"timestamp\":1785564824,\"today_s\":613},\"intervals\":[],\"lastCallbackAttempt\":1785571793,\"localStorageId\":\"39256669\",\"syncedL24HS\":null,\"syncedTodayS\":null}"
+          "value": "{\"actorId\":\"61592303773066\",\"currentIntervalLastTick\":1785576217,\"currentIntervalStart\":1785576198,\"initRemoteAgg\":{\"timestamp\":1785575738,\"today_s\":632},\"intervals\":[{\"end\":1785571793,\"start\":1785571793}],\"lastCallbackAttempt\":1785576198,\"localStorageId\":\"3303470\",\"syncedL24HS\":null,\"syncedTodayS\":null}"
         },
         {
           "name": "last_headload_time",
-          "value": "1785571793315"
+          "value": "1785576199038"
         },
         {
           "name": "RSTData",
           "value": "{}"
+        },
+        {
+          "name": "screen_time_event_log_61592303773066_neel3h",
+          "value": "{\"actorId\":\"61592303773066\",\"events\":[{\"data\":\"comet.group\",\"tabID\":\"neel3h\",\"timestampMs\":1785576202793,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[],\"continuousScreenTimeMs\":2349,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":1454,\"lastEventKey\":\"1785576202793|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576202793,\"onReachRescheduleBaselineMs\":0,\"status\":\"inactive\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576202793|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576202793,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]},{\"data\":\"comet.group\",\"tabID\":\"neel3h\",\"timestampMs\":1785576207120,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[],\"continuousScreenTimeMs\":2349,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":5781,\"lastEventKey\":\"1785576207120|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576207120,\"onReachRescheduleBaselineMs\":0,\"status\":\"inactive\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576207120|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576207120,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]},{\"data\":\"comet.group\",\"tabID\":\"neel3h\",\"timestampMs\":1785576212124,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[],\"continuousScreenTimeMs\":2349,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":10785,\"lastEventKey\":\"1785576212124|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576212124,\"onReachRescheduleBaselineMs\":0,\"status\":\"inactive\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576212124|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576212124,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]},{\"data\":\"comet.group\",\"tabID\":\"neel3h\",\"timestampMs\":1785576217124,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[],\"continuousScreenTimeMs\":2349,\"continuousSessionId\":\"1785576198990\",\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":15785,\"lastEventKey\":\"1785576217124|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576217124,\"onReachRescheduleBaselineMs\":0,\"status\":\"inactive\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785576217124|neel3h|102|comet.group\",\"lastEventTimestampMs\":1785576217124,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]}]}"
         },
         {
           "name": "bdz_playback_state",
@@ -193,11 +213,7 @@
         },
         {
           "name": "hb_timestamp",
-          "value": "1785571795091"
-        },
-        {
-          "name": "mw_encrypted_backups_restore_upsell_first_impression_time_key",
-          "value": "1785571793590"
+          "value": "1785576204205"
         },
         {
           "name": "ares_last_signal_flush",
@@ -205,19 +221,7 @@
         },
         {
           "name": "signal_flush_timestamp",
-          "value": "1785571795126"
-        },
-        {
-          "name": "Session",
-          "value": "k1rewt:1785571828066"
-        },
-        {
-          "name": "screen_time_event_log_61592303773066_fflpzo",
-          "value": "{\"actorId\":\"61592303773066\",\"events\":[{\"data\":\"comet.home\",\"tabID\":\"fflpzo\",\"timestampMs\":1785571793889,\"type\":102,\"sessionAfter\":[[1,{\"activeTabs\":[[\"fflpzo\",1785571793889]],\"continuousScreenTimeMs\":0,\"continuousSessionId\":\"1785571793889\",\"currentIntervalStartEvent\":{\"data\":\"comet.home\",\"tabID\":\"fflpzo\",\"timestampMs\":1785571793889,\"type\":102},\"currentIntervalStartModule\":\"comet.home\",\"currentIntervalStartMs\":1785571793889,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785571793889|fflpzo|102|comet.home\",\"lastEventTimestampMs\":1785571793889,\"onReachRescheduleBaselineMs\":0,\"status\":\"active\"}],[2,{\"activeTabs\":[],\"continuousScreenTimeMs\":0,\"continuousSessionId\":null,\"currentIntervalStartEvent\":null,\"currentIntervalStartModule\":null,\"currentIntervalStartMs\":null,\"currentSessionInactiveTimeMs\":0,\"lastEventKey\":\"1785571793889|fflpzo|102|comet.home\",\"lastEventTimestampMs\":1785571793889,\"onReachRescheduleBaselineMs\":0,\"status\":\"none\"}]]}]}"
-        },
-        {
-          "name": "banzai:last_storage_flush",
-          "value": "1785571795224.4001"
+          "value": "1785576204301"
         }
       ]
     },

@@ -8,12 +8,85 @@ import glob
 import json
 import time
 import asyncio
+import shutil
+import subprocess
 from typing import List, Dict, Any, Optional, Tuple
 from playwright.async_api import async_playwright
 
 import config
 from utils.helpers import log
 from engine.browser import get_session_info, save_session_state
+
+
+# ── X Server / Xvfb Helper ────────────────────────────────────────────────────
+_xvfb_process: Optional[subprocess.Popen] = None
+
+
+def _ensure_display() -> bool:
+    """
+    Pastikan ada DISPLAY environment variable yang valid untuk launch browser GUI.
+
+    - Jika DISPLAY sudah set (ada X server) → return True.
+    - Jika DISPLAY kosong DAN xvfb-run/Xvfb tersedia → start Xvfb virtual display,
+      set DISPLAY=:99, return True.
+    - Jika tidak ada X server maupun Xvfb → return False (caller harus fallback
+      ke headless mode atau report error yang jelas).
+
+    Return True jika browser GUI bisa di-launch.
+    """
+    global _xvfb_process
+
+    # Sudah ada DISPLAY — asumsikan X server berjalan
+    if os.environ.get("DISPLAY"):
+        return True
+
+    # Cari Xvfb binary
+    xvfb_bin = shutil.which("Xvfb")
+    if not xvfb_bin:
+        log("   ⚠️ Tidak ada X server (DISPLAY kosong) dan Xvfb tidak terinstall.")
+        log("   ℹ️ Install dengan: sudo apt-get install -y xvfb")
+        return False
+
+    # Start Xvfb di display :99 dengan resolution 1366x768x24
+    try:
+        _xvfb_process = subprocess.Popen(
+            [xvfb_bin, ":99", "-screen", "0", "1366x768x24", "-ac", "-nolisten", "tcp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Beri waktu Xvfb untuk start
+        time.sleep(1.0)
+        if _xvfb_process.poll() is not None:
+            log("   ⚠️ Xvfb gagal start (process exited immediately).")
+            _xvfb_process = None
+            return False
+        os.environ["DISPLAY"] = ":99"
+        log("   🖥️ Xvfb virtual display dimulai di :99 (headless server detected).")
+        return True
+    except Exception as e:
+        log(f"   ⚠️ Gagal start Xvfb: {e}")
+        _xvfb_process = None
+        return False
+
+
+def _cleanup_xvfb():
+    """Cleanup Xvfb process saat aplikasi shutdown."""
+    global _xvfb_process
+    if _xvfb_process is not None:
+        try:
+            _xvfb_process.terminate()
+            _xvfb_process.wait(timeout=3)
+        except Exception:
+            try:
+                _xvfb_process.kill()
+            except Exception:
+                pass
+        _xvfb_process = None
+
+
+def _can_launch_gui_browser() -> bool:
+    """Cek apakah browser GUI (headless=False) bisa di-launch di environment ini."""
+    return _ensure_display()
 
 
 
@@ -63,8 +136,20 @@ async def interactive_login_new_account(account_tag: Optional[str] = None) -> st
     """
     Buka Chromium GUI interaktif agar pengguna dapat login ke akun Facebook baru secara manual,
     lalu secara otomatis menyimpan cookie sesi ke file JSON.
+
+    Mendeteksi environment headless (tanpa X server) dan otomatis start Xvfb virtual
+    display sebagai fallback. Jika Xvfb tidak tersedia, return error yang jelas.
     """
     log("\n🔑 [LOGIN INTERAKTIF AKUN BARU]")
+
+    # Cek apakah browser GUI bisa di-launch
+    if not _can_launch_gui_browser():
+        log("   ❌ Tidak dapat membuka browser GUI di environment ini.")
+        log("   ℹ️ Environment headless terdeteksi. Install Xvfb untuk mengaktifkan:")
+        log("      sudo apt-get install -y xvfb")
+        log("   ℹ️ Atau gunakan fitur Import Sesi JSON (paste cookie manual).")
+        return ""
+
     log("   Browser GUI akan terbuka. Silakan lakukan login ke Facebook di browser.")
 
     if not account_tag:
@@ -79,90 +164,151 @@ async def interactive_login_new_account(account_tag: Optional[str] = None) -> st
     safe_tag = "".join([c if c.isalnum() else "_" for c in account_tag]).lower()
     target_path = os.path.join(config.SESSION_DIR, f"fb_session_{safe_tag}.json")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled", "--window-size=1366,768"],
-        )
-        context = await browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            user_agent=config.USER_AGENT_DESKTOP,
-        )
-        page = await context.new_page()
+    browser = None
+    try:
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.launch(
+                    headless=False,
+                    args=["--disable-blink-features=AutomationControlled", "--window-size=1366,768", "--no-sandbox"],
+                )
+            except Exception as launch_e:
+                err_msg = str(launch_e)
+                if "Missing X server" in err_msg or "$DISPLAY" in err_msg:
+                    log("   ❌ Browser GUI gagal dibuka: Missing X server.")
+                    log("   ℹ️ Xvfb mungkin gagal start. Coba restart server atau install Xvfb.")
+                else:
+                    log(f"   ❌ Browser GUI gagal dibuka: {launch_e}")
+                return ""
 
-        await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
-        log("   👉 Menunggu Anda menyelesaikan login di browser...")
+            context = await browser.new_context(
+                viewport={"width": 1366, "height": 768},
+                user_agent=config.USER_AGENT_DESKTOP,
+            )
+            page = await context.new_page()
 
-        # Polling sampai cookie c_user terdeteksi
-        logged_in = False
-        for _ in range(120):  # Maksimal 2 menit
-            await asyncio.sleep(2)
-            cookies = await context.cookies()
-            if any(c.get("name") == "c_user" for c in cookies):
-                logged_in = True
-                break
+            await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
+            log("   👉 Menunggu Anda menyelesaikan login di browser...")
+            log("   ⏳ Timeout: 4 menit. Selesaikan login sebelum waktu habis.")
 
-        if logged_in:
-            await page.wait_for_timeout(2000)
-            await save_session_state(context, target_path, name=account_tag)
-            log(f"   🎉 Login BERHASIL! Sesi disimpan ke: {target_path}")
-            await browser.close()
-            return target_path
-        else:
-            log("   ❌ Waktu login habis atau login gagal.")
-            await browser.close()
-            return ""
+            # Polling sampai cookie c_user terdeteksi (max 4 menit)
+            logged_in = False
+            for i in range(120):  # 120 x 2s = 240s = 4 menit
+                await asyncio.sleep(2)
+                cookies = await context.cookies()
+                if any(c.get("name") == "c_user" for c in cookies):
+                    logged_in = True
+                    break
+                # Progress setiap 30 detik
+                if i > 0 and i % 15 == 0:
+                    remaining = 240 - (i * 2)
+                    log(f"   ⏳ Menunggu login... {remaining}s tersisa")
+
+            if logged_in:
+                await page.wait_for_timeout(2000)
+                await save_session_state(context, target_path, name=account_tag)
+                log(f"   🎉 Login BERHASIL! Sesi disimpan ke: {target_path}")
+                await browser.close()
+                return target_path
+            else:
+                log("   ❌ Waktu login habis (4 menit) atau login gagal.")
+                await browser.close()
+                return ""
+    except Exception as e:
+        log(f"   ❌ Error saat login interaktif: {e}")
+        if browser:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        return ""
 
 
 async def relogin_existing_account(session_file: str) -> bool:
     """
     Buka Chromium GUI interaktif untuk memperbarui/refresh cookie sesi pada file sesi yang sudah ada.
+
+    Mendeteksi environment headless (tanpa X server) dan otomatis start Xvfb virtual
+    display sebagai fallback. Jika Xvfb tidak tersedia, return False dengan error jelas.
     """
     info = get_session_info(session_file)
     curr_name = info.get("name", os.path.basename(session_file))
     log(f"\n🔄 [LOGIN ULANG / REFRESH SESI: {curr_name}]")
     log(f"   Target file: {session_file}")
-    log("   Browser GUI akan terbuka. Silakan selesaikan login / verifikasi akun di browser.")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled", "--window-size=1366,768"],
-        )
-        context_kwargs = {
-            "viewport": {"width": 1366, "height": 768},
-            "user_agent": config.USER_AGENT_DESKTOP,
-        }
-        if os.path.exists(session_file):
+    # Cek apakah browser GUI bisa di-launch
+    if not _can_launch_gui_browser():
+        log("   ❌ Tidak dapat membuka browser GUI di environment ini.")
+        log("   ℹ️ Environment headless terdeteksi. Install Xvfb untuk mengaktifkan:")
+        log("      sudo apt-get install -y xvfb")
+        log("   ℹ️ Atau import ulang file sesi JSON manual via tombol Import Sesi.")
+        return False
+
+    log("   Browser GUI akan terbuka. Silakan selesaikan login / verifikasi akun di browser.")
+    log("   ⏳ Timeout: 4 menit.")
+
+    browser = None
+    try:
+        async with async_playwright() as p:
             try:
-                context_kwargs["storage_state"] = session_file
+                browser = await p.chromium.launch(
+                    headless=False,
+                    args=["--disable-blink-features=AutomationControlled", "--window-size=1366,768", "--no-sandbox"],
+                )
+            except Exception as launch_e:
+                err_msg = str(launch_e)
+                if "Missing X server" in err_msg or "$DISPLAY" in err_msg:
+                    log("   ❌ Browser GUI gagal dibuka: Missing X server.")
+                    log("   ℹ️ Xvfb mungkin gagal start. Coba restart server atau install Xvfb.")
+                else:
+                    log(f"   ❌ Browser GUI gagal dibuka: {launch_e}")
+                return False
+
+            context_kwargs = {
+                "viewport": {"width": 1366, "height": 768},
+                "user_agent": config.USER_AGENT_DESKTOP,
+            }
+            if os.path.exists(session_file):
+                try:
+                    context_kwargs["storage_state"] = session_file
+                except Exception:
+                    pass
+
+            context = await browser.new_context(**context_kwargs)
+            page = await context.new_page()
+
+            await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
+            log("   👉 Menunggu proses login / verifikasi selesai...")
+
+            logged_in = False
+            for i in range(120):  # 4 menit
+                await asyncio.sleep(2)
+                cookies = await context.cookies()
+                if any(c.get("name") == "c_user" for c in cookies):
+                    logged_in = True
+                    break
+                if i > 0 and i % 15 == 0:
+                    remaining = 240 - (i * 2)
+                    log(f"   ⏳ Menunggu relogin... {remaining}s tersisa")
+
+            if logged_in:
+                await page.wait_for_timeout(2000)
+                await save_session_state(context, session_file, name=curr_name)
+                log(f"   🎉 Sesi {curr_name} BERHASIL diperbarui & disimpan!")
+                await browser.close()
+                return True
+            else:
+                log("   ❌ Waktu login habis (4 menit) atau login gagal.")
+                await browser.close()
+                return False
+    except Exception as e:
+        log(f"   ❌ Error saat relogin: {e}")
+        if browser:
+            try:
+                await browser.close()
             except Exception:
                 pass
-
-        context = await browser.new_context(**context_kwargs)
-        page = await context.new_page()
-
-        await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
-        log("   👉 Menunggu proses login / verifikasi selesai...")
-
-        logged_in = False
-        for _ in range(120):  # Maksimal 2 menit
-            await asyncio.sleep(2)
-            cookies = await context.cookies()
-            if any(c.get("name") == "c_user" for c in cookies):
-                logged_in = True
-                break
-
-        if logged_in:
-            await page.wait_for_timeout(2000)
-            await save_session_state(context, session_file, name=curr_name)
-            log(f"   🎉 Sesi {curr_name} BERHASIL diperbarui & disimpan!")
-            await browser.close()
-            return True
-        else:
-            log("   ❌ Waktu login habis atau login gagal.")
-            await browser.close()
-            return False
+        return False
 
 
 def update_session_name(session_file: str, new_name: str) -> bool:
