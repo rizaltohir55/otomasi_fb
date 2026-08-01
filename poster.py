@@ -160,8 +160,9 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
             pass
 
     if not await _dialog_active(page):
-        # Cari trigger
+        # Cari trigger — coba 2x: pertama langsung, kedua setelah reload
         trigger = await _find_trigger(page)
+
         if not trigger:
             # Coba tab Diskusi (grup Jual-Beli)
             try:
@@ -172,6 +173,24 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
                     trigger = await _find_trigger(page)
             except Exception:
                 pass
+
+        if not trigger:
+            # Reload halaman — setelah join, FB sering belum render komposer
+            log(f"   🔄 Reload halaman (komposer belum muncul)...", tag)
+            await page.reload(wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(2000)
+            trigger = await _find_trigger(page)
+
+            if not trigger:
+                # Coba tab Diskusi lagi setelah reload
+                try:
+                    disc = page.locator('a[role="tab"]:has-text("Diskusi"), a[role="tab"]:has-text("Discussion")').first
+                    if await disc.count() > 0:
+                        await disc.click(timeout=2000)
+                        await page.wait_for_timeout(800)
+                        trigger = await _find_trigger(page)
+                except Exception:
+                    pass
 
         if trigger:
             try:

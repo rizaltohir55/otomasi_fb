@@ -117,7 +117,8 @@ async def execute_join(page, group_url, tag=""):
     await _handle_join_modal(page, tag)
 
     # Polling status
-    for _ in range(config.JOIN_POLL_MAX_SEC if hasattr(config, 'JOIN_POLL_MAX_SEC') else 7):
+    poll_max = 10  # 10 detik
+    for i in range(poll_max):
         await page.wait_for_timeout(1000)
         # Cek restriction
         is_res, _ = await check_restriction(page)
@@ -130,8 +131,17 @@ async def execute_join(page, group_url, tag=""):
         if status in ["RESTRICTED", "NOT_LOGGED_IN"]:
             return False
 
-    # Retry modal
+    # Retry: handle modal lagi
     await _handle_join_modal(page, tag)
+    await page.wait_for_timeout(2000)
+    status = await check_membership(page, group_url, tag)
+    if status in ["JOINED", "PENDING"]:
+        log(f"   ✅ Join berhasil! Status: {status}", tag)
+        return True
+
+    # Retry 2: reload halaman grup lalu cek lagi
+    log(f"   🔄 Reload halaman grup (cek status join)...", tag)
+    await goto(page, group_url, timeout_ms=20000)
     await page.wait_for_timeout(2000)
     status = await check_membership(page, group_url, tag)
     if status in ["JOINED", "PENDING"]:
