@@ -317,11 +317,34 @@ async def api_verify_all_sessions():
 
 
 def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
-    """Fungsi pembantu yang berjalan di thread mandiri dengan WindowsProactorEventLoop khusus."""
+    """
+    Fungsi pembantu yang berjalan di thread mandiri dengan event loop khusus.
+
+    Memeriksa kemampuan posting per akun. Logika verifikasi login SAMA dengan
+    verify_session_live_status() supaya hasil kedua endpoint konsisten —
+    perbedaannya hanya check-posting menambahkan:
+    - Navigasi ke /groups/feed/ (bukan home saja)
+    - Klik composer trigger ("Tulis sesuatu...")
+    - Cek restriction SETELAH composer terbuka (modal inline rate-limit)
+    - Scan body text untuk RESTRICTION_TEXTS
+
+    Status yang dikembalikan:
+    - ACTIVE     : login valid + bisa buka composer tanpa restriction
+    - EXPIRED    : sesi kedaluwarsa (c_user hilang / redirect login / form login)
+    - CHECKPOINT : halaman 2FA / verifikasi identitas
+    - RESTRICTED : akun dibatasi FB (rate-limit, action blocked, dll)
+    - UNKNOWN    : error tak terduga, tidak dapat diverifikasi
+    """
     import sys
     import asyncio
     from playwright.async_api import async_playwright
-    from engine.browser import create_stealth_context, check_account_restriction, verify_login_status
+    from engine.browser import (
+        create_stealth_context,
+        check_account_restriction,
+        verify_login_status,
+        handle_profile_selector_page,
+        is_on_checkpoint_page,
+    )
 
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -331,12 +354,15 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
 
     async def _async_runner():
         semaphore = asyncio.Semaphore(2)
+
         async def check_single(p, s: dict) -> dict:
             spath = s.get("path", "")
             sname = s.get("name", "Akun")
+            cuser = s.get("c_user", "")
 
             if not os.path.exists(spath):
-                return {"path": spath, "name": sname, "status": "EXPIRED", "message": "File sesi tidak ditemukan"}
+                return {"path": spath, "name": sname, "c_user": cuser,
+                        "status": "EXPIRED", "message": "File sesi tidak ditemukan"}
 
             async with semaphore:
                 log(f"   🔍 Memeriksa akun: {sname}...")
@@ -346,26 +372,108 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
                     browser, context = await create_stealth_context(p, session_file=spath, headless=True)
                     page = await context.new_page()
 
-                    # 1. Navigasi ke Feed Utama Grup (Grup Tempat Akun Terdaftar)
-                    target_url = "https://www.facebook.com/groups/feed/"
-                    await page.goto(target_url, wait_until="domcontentloaded", timeout=12000)
-                    await page.wait_for_timeout(2000)
+                    # ── FASE 1: Verifikasi login (SAMA dengan verify_session_live_status) ──
+                    # Navigasi ke home FB dulu untuk cek status login yang akurat.
+                    try:
+                        await page.goto(
+                            "https://www.facebook.com/",
+                            wait_until="domcontentloaded",
+                            timeout=20000
+                        )
+                    except Exception as nav_e:
+                        try:
+                            await page.goto(
+                                "https://www.facebook.com/",
+                                wait_until="commit",
+                                timeout=12000
+                            )
+                        except Exception:
+                            return {"path": spath, "name": sname, "c_user": cuser,
+                                    "status": "UNKNOWN", "message": f"Navigasi FB gagal: {nav_e}"}
 
-                    current_url = page.url.lower()
-                    if "login" in current_url or "checkpoint" in current_url:
-                        return {"path": spath, "name": sname, "status": "EXPIRED", "message": "Sesi Kedaluwarsa / Checkpoint"}
+                    await page.wait_for_timeout(2500)
 
-                    is_logged_in = await verify_login_status(page)
-                    if not is_logged_in:
-                        return {"path": spath, "name": sname, "status": "EXPIRED", "message": "Sesi Kedaluwarsa"}
+                    # Handle profile-selector page (multi-account) kalau muncul
+                    await handle_profile_selector_page(page, worker_tag=f"Check-{sname}")
 
-                    # 2. Cek pembatasan global awal di halaman
+                    final_url = page.url.lower()
+
+                    # Cek URL login/checkpoint/recover
+                    if "login" in final_url or "recover" in final_url:
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "EXPIRED", "message": "Sesi kedaluwarsa (redirect ke halaman login)"}
+                    if "checkpoint" in final_url or "two_step" in final_url:
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "CHECKPOINT", "message": "Akun terkena checkpoint FB (2FA/verifikasi)"}
+
+                    # Cek cookie c_user SETELAH navigasi
+                    # FB kadang hapus c_user via Set-Cookie kalau sesi invalid di server.
+                    # Halaman profile-selector tanpa c_user = sesi invalid (FB hanya kenal device).
+                    cookies_after = await context.cookies()
+                    c_user_after = any(c.get("name") == "c_user" for c in cookies_after)
+                    if not c_user_after:
+                        # Cek profile-selector / form login di body
+                        try:
+                            body_text = (await page.locator("body").inner_text(timeout=1500)).lower()
+                            if any(kw in body_text for kw in [
+                                "gunakan profil lain", "use another profile",
+                                "jelajahi hal-hal yang anda sukai"
+                            ]):
+                                # Profile selector tanpa c_user = sesi invalid, perlu relogin
+                                return {"path": spath, "name": sname, "c_user": cuser,
+                                        "status": "EXPIRED", "message": "Sesi kedaluwarsa (profile-selector — perlu relogin)"}
+                            elif any(kw in body_text for kw in ["masuk", "log in", "daftar", "sign up"]):
+                                return {"path": spath, "name": sname, "c_user": cuser,
+                                        "status": "EXPIRED", "message": "Sesi kedaluwarsa (form login terlihat)"}
+                            else:
+                                return {"path": spath, "name": sname, "c_user": cuser,
+                                        "status": "EXPIRED", "message": "Sesi kedaluwarsa (c_user dihapus FB setelah navigasi)"}
+                        except Exception:
+                            return {"path": spath, "name": sname, "c_user": cuser,
+                                    "status": "EXPIRED", "message": "Sesi kedaluwarsa (c_user dihapus FB)"}
+
+                    # c_user masih ada — cek checkpoint indicators di body
+                    if await is_on_checkpoint_page(page):
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "CHECKPOINT", "message": "Halaman checkpoint terdeteksi (2FA/verifikasi identitas)"}
+
+                    # Cek restriction global awal
                     is_res, reason = await check_account_restriction(page)
                     if is_res:
                         log(f"   ⛔ [{sname}] DIBATASI: {reason}")
-                        return {"path": spath, "name": sname, "status": "RESTRICTED", "message": reason}
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "RESTRICTED", "message": f"Akun dibatasi FB: {reason}"}
 
-                    # 3. Klik Pemicu Komposer Grup ("Tulis sesuatu...", "Write something...")
+                    # ── FASE 2: Cek kemampuan posting (khusus check-posting) ──
+                    # Navigasi ke /groups/feed/ untuk uji composer
+                    try:
+                        await page.goto(
+                            "https://www.facebook.com/groups/feed/",
+                            wait_until="domcontentloaded",
+                            timeout=15000
+                        )
+                        await page.wait_for_timeout(2000)
+                    except Exception as nav_e:
+                        # Navigasi grup feed gagal — tapi login sudah terverifikasi di fase 1.
+                        # Return ACTIVE dengan catatan (lebih akurat daripada EXPIRED).
+                        log(f"   ⚠️ [{sname}] Navigasi /groups/feed/ gagal: {nav_e}. Login tetap valid.")
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "ACTIVE", "message": "Sesi aktif (navigasi grup feed gagal, tapi login valid)"}
+
+                    # Re-cek login setelah navigasi grup (bisa berubah)
+                    grp_url = page.url.lower()
+                    if "login" in grp_url or "checkpoint" in grp_url:
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "EXPIRED", "message": "Sesi kedaluwarsa saat akses grup feed"}
+
+                    # Cek restriction di halaman grup
+                    is_res_grp, reason_grp = await check_account_restriction(page)
+                    if is_res_grp:
+                        log(f"   ⛔ [{sname}] DIBATASI di grup: {reason_grp}")
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "RESTRICTED", "message": f"Dibatasi FB di halaman grup: {reason_grp}"}
+
+                    # Klik composer trigger ("Tulis sesuatu...", "Write something...")
                     composer_trig = page.locator(
                         'div[role="button"]:has-text("Write something"), '
                         'div[role="button"]:has-text("Tulis sesuatu"), '
@@ -382,34 +490,50 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
                         except Exception:
                             pass
 
-                    # 4. Cek restriction setelah komposer terbuka (modal dialog / alert)
+                    # Cek restriction SETELAH composer terbuka (modal inline rate-limit)
                     is_res_after, reason_after = await check_account_restriction(page)
                     if is_res_after:
-                        log(f"   ⛔ [{sname}] DIBATASI: {reason_after}")
-                        return {"path": spath, "name": sname, "status": "RESTRICTED", "message": reason_after}
+                        log(f"   ⛔ [{sname}] DIBATASI setelah composer: {reason_after}")
+                        return {"path": spath, "name": sname, "c_user": cuser,
+                                "status": "RESTRICTED", "message": f"Dibatasi FB (composer): {reason_after}"}
 
-                    # 5. Cek teks pembatasan spesifik di seluruh body halaman
+                    # Cek teks pembatasan spesifik di body halaman (scan luas)
                     try:
-                        body_text = (await page.locator("body").inner_text()).lower()
+                        body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
                         for kw in config.RESTRICTION_TEXTS:
                             if kw in body_text:
                                 log(f"   ⛔ [{sname}] DIBATASI: Teks '{kw}' terdeteksi")
-                                return {"path": spath, "name": sname, "status": "RESTRICTED", "message": f"Dibatasi FB: '{kw}'"}
+                                return {"path": spath, "name": sname, "c_user": cuser,
+                                        "status": "RESTRICTED", "message": f"Dibatasi FB: '{kw}'"}
                     except Exception:
                         pass
 
-                    log(f"   ✅ [{sname}] Tidak ada pembatasan — akun dapat memposting.")
-                    return {"path": spath, "name": sname, "status": "ACTIVE", "message": "Akun Aktif & Dapat Memposting"}
+                    # Cek inline failure di composer (rate-limit message)
+                    try:
+                        from engine.composer import detect_composer_post_failure
+                        is_fail, fail_reason = await detect_composer_post_failure(page, worker_tag=f"Check-{sname}")
+                        if is_fail:
+                            log(f"   ⛔ [{sname}] COMPOSER FAILURE: {fail_reason}")
+                            return {"path": spath, "name": sname, "c_user": cuser,
+                                    "status": "RESTRICTED", "message": f"Composer error: {fail_reason}"}
+                    except Exception:
+                        pass
+
+                    log(f"   ✅ [{sname}] Aktif & dapat memposting.")
+                    return {"path": spath, "name": sname, "c_user": cuser,
+                            "status": "ACTIVE", "message": "Akun aktif & dapat memposting"}
 
                 except Exception as e:
                     err_msg = str(e) or type(e).__name__
                     log(f"   ⚠️ [{sname}] Warning saat cek posting: {err_msg}")
-                    # Konservatif: jangan return "ACTIVE" kalau belum sempat verifikasi.
-                    # Hanya return ACTIVE kalau sudah lolos semua cek restriction di atas.
-                    return {"path": spath, "name": sname, "status": "UNKNOWN", "message": f"Tidak dapat diverifikasi: {err_msg}"}
+                    return {"path": spath, "name": sname, "c_user": cuser,
+                            "status": "UNKNOWN", "message": f"Tidak dapat diverifikasi: {err_msg}"}
                 finally:
                     try:
                         if context: await context.close()
+                    except Exception:
+                        pass
+                    try:
                         if browser: await browser.close()
                     except Exception:
                         pass
@@ -421,7 +545,10 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
     try:
         return loop.run_until_complete(_async_runner())
     finally:
-        loop.close()
+        try:
+            loop.close()
+        except Exception:
+            pass
 
 
 

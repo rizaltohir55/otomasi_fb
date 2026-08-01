@@ -370,19 +370,23 @@ async def verify_session_live_status(session_file: str) -> Dict[str, Any]:
                         return "CHECKPOINT", "Akun terkena checkpoint FB (2FA/verifikasi)"
 
                     # Cek cookie c_user SETELAH navigasi
-                    # FB kadang hapus c_user via Set-Cookie kalau sesi invalid di server
+                    # FB kadang hapus c_user via Set-Cookie kalau sesi invalid di server.
+                    # Halaman profile-selector ("Jelajahi hal-hal yang Anda sukai" + "Lanjutkan")
+                    # muncul ketika FB mengenali device tapi sesi login TIDAK valid —
+                    # user perlu re-login manual. Jadi profile-selector TANPA c_user = EXPIRED.
                     cookies_after = await context.cookies()
                     c_user_after = any(c.get("name") == "c_user" for c in cookies_after)
                     if not c_user_after:
-                        # Cek apakah ini halaman profile-selector (multi-account)
+                        # Cek apakah ini halaman profile-selector (multi-account device)
                         try:
                             body_text = (await page.locator("body").inner_text(timeout=1500)).lower()
                             if any(kw in body_text for kw in [
                                 "gunakan profil lain", "use another profile",
                                 "jelajahi hal-hal yang anda sukai"
                             ]):
-                                # Profile selector — sesi valid tapi perlu klik Lanjutkan
-                                return "ACTIVE", "Sesi aktif (halaman profile-selector terdeteksi)"
+                                # Profile selector tanpa c_user = sesi sudah invalid,
+                                # FB hanya mengenali device. User perlu relogin.
+                                return "EXPIRED", "Sesi kedaluwarsa (halaman profile-selector — perlu relogin)"
                             # Cek form login
                             if any(kw in body_text for kw in ["masuk", "log in", "daftar", "sign up"]):
                                 return "EXPIRED", "Sesi kedaluwarsa (form login terlihat)"
