@@ -29,6 +29,7 @@ from engine.browser import (
     verify_login_status,
     generate_deterministic_profile,
     get_session_info,
+    handle_profile_selector_page,
 )
 from engine.collector import load_caption, find_media_images
 from engine.composer import execute_post_to_group
@@ -235,6 +236,9 @@ async def worker_loop(
             except Exception as e:
                 log(f"⚠️ Navigasi awal Facebook berhalangan: {e}", worker_tag)
 
+            # Coba handle profile-selector page (multi-account) jika muncul
+            await handle_profile_selector_page(page, worker_tag=worker_tag)
+
             is_logged_in = await verify_login_status(page)
             if not is_logged_in:
                 log(f"❌ Worker [{worker_tag}] GAGAL LOGIN. Cookie sesi kedaluwarsa atau ter-checkpoint.", worker_tag)
@@ -319,7 +323,7 @@ async def worker_loop(
                             continue
 
                         notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Menulis caption & mengunggah postingan...")
-                        ok = await execute_post_to_group(page, group_url, caption, media_images, worker_tag=worker_tag)
+                        ok, reason = await execute_post_to_group(page, group_url, caption, media_images, worker_tag=worker_tag)
                         if ok:
                             success_count += 1
                             notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Postingan berhasil dikirim!")
@@ -331,7 +335,25 @@ async def worker_loop(
                                 log(f"   ⚠️ Auto-comment gagal (non-fatal): {cmt_e}", worker_tag)
                         else:
                             fail_count += 1
-                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg="Gagal membuat postingan")
+                            notify_status("PROCESSING", current_group=group_url, current_idx=idx, step_msg=f"Gagal membuat postingan ({reason})")
+
+                            # Jika kegagalan karena rate-limit, hentikan batch worker segera
+                            # supaya tidak memperburuk status rate-limit akun.
+                            if reason == "rate_limited":
+                                log(f"   ⛔ RATE LIMIT terdeteksi pada grup {group_url}.", worker_tag)
+                                log(f"   🛑 Menghentikan batch worker [{worker_tag}] agar akun tidak semakin dibatasi.", worker_tag)
+                                # Tandai cooldown RESTRICTED (FB biasanya memberlakukan 30 menit)
+                                if c_user_id:
+                                    restriction_cooldown.mark_restricted(c_user_id, reason="rate_limited during post submit")
+                                fail_count += (len(worker_groups) - idx)
+                                worker_status = "RATE_LIMITED"
+                                notify_status("RATE_LIMITED", current_group=group_url, current_idx=idx, step_msg="Rate limit FB — worker dihentikan")
+                                break
+
+                            # Jika composer bocor dari grup sebelumnya (detected via reason),
+                            # skip grup ini supaya tidak double-post ke grup salah
+                            if reason == "composer_open_failed":
+                                group_skip_list.add(group_url, reason="composer open failed")
 
                     elif mode == "2":
                         # Mode 2: Auto Join Saja

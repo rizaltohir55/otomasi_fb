@@ -372,5 +372,58 @@ RESTRICTION_TEXTS = [
     "feature suspended",
     "we've temporarily limited",
     "akun ditangguhkan sementara",
+    # ── Inline rate-limit message (muncul di dalam dialog composer SETELAH klik submit gagal) ──
+    # Pesan ini muncul saat FB membatasi frekuensi posting/comment per akun/IP.
+    "kami membatasi seberapa sering anda dapat memposting",
+    "anda bisa mencoba lagi nanti",
+    "melindungi komunitas dari spam",
+    "we limit how often you can post",
+    "you can try again later",
+    "protect the community from spam",
+    "try again later",
+    # ── Indikator profile-selector page (multi-account) ──
+    "gunakan profil lain",
+    "use another profile",
+]
+
+# Teks spesifik yang muncul DI DALAM dialog composer setelah klik submit gagal.
+# Berbeda dari RESTRICTION_TEXTS (yang dicek di seluruh halaman) — ini dicek
+# HANYA di dalam dialog composer aktif, lebih akurat & false-positive rendah.
+COMPOSER_POST_FAILURE_TEXTS = [
+    # Rate limit
+    "kami membatasi seberapa sering anda dapat memposting",
+    "anda bisa mencoba lagi nanti",
+    "melindungi komunitas dari spam",
+    "we limit how often you can post",
+    "you can try again later",
+    "protect the community from spam",
+    # Pending review
+    "menunggu persetujuan admin",
+    "pending admin approval",
+    "menunggu persetujuan",
+    # Generic error
+    "terjadi kesalahan",
+    "something went wrong",
+    "tidak dapat memposting saat ini",
+    "unable to post",
+    "couldn't post",
+    "gagal memposting",
+    "coba lagi nanti",
+    # Spam detection
+    "terlihat seperti spam",
+    "looks like spam",
+    "spam",
+]
+
+# Teks yang menandakan halaman profile-selector FB (multi-account).
+# Saat halaman ini muncul, perlu klik tombol "Lanjutkan" / "Continue" untuk
+# masuk ke feed utama.
+PROFILE_SELECTOR_TEXTS = [
+    "gunakan profil lain",
+    "use another profile",
+    "lanjutkan",
+    "continue",
+    "jelajahi hal-hal yang anda sukai",
+    "explore things you're interested in",
 ]
 

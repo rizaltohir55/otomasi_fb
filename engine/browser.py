@@ -282,32 +282,84 @@ async def save_session_state(context: BrowserContext, session_file: str, name: s
                 pass
 
 
+async def handle_profile_selector_page(page: Page, worker_tag: str = "") -> bool:
+    """
+    Deteksi & tangani halaman profile-selector FB (multi-account).
+    FB kadang menampilkan halaman "Jelajahi hal-hal yang Anda sukai" + "Lanjutkan"
+    saat akun punya multiple profiles. Tanpa handler ini, otomasi akan stuck
+    karena halaman ini bukan feed utama dan bukan halaman login.
+
+    Mengembalikan True jika halaman profile-selector terdeteksi DAN berhasil di-handle.
+    """
+    try:
+        body_text = (await page.locator("body").inner_text(timeout=1500)).lower()
+        # Cek apakah ini halaman profile-selector
+        is_selector = any(kw in body_text for kw in [
+            "gunakan profil lain",
+            "use another profile",
+            "jelajahi hal-hal yang anda sukai",
+            "explore things you're interested in",
+        ])
+        if not is_selector:
+            return False
+
+        log("   ℹ️ Halaman profile-selector FB terdeteksi. Mencoba klik 'Lanjutkan'...", worker_tag)
+
+        # Cari tombol "Lanjutkan" / "Continue"
+        continue_selectors = [
+            'div[role="button"]:has-text("Lanjutkan")',
+            'div[role="button"]:has-text("Continue")',
+            'a:has-text("Lanjutkan")',
+            'a:has-text("Continue")',
+            'span:has-text("Lanjutkan")',
+            'span:has-text("Continue")',
+        ]
+        for sel in continue_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.count() > 0 and await btn.is_visible(timeout=500):
+                    await btn.click(timeout=2000)
+                    await page.wait_for_timeout(2000)
+                    log("   ✅ Berhasil klik 'Lanjutkan' di profile-selector.", worker_tag)
+                    return True
+            except Exception:
+                continue
+
+        log("   ⚠️ Halaman profile-selector terdeteksi tapi tombol 'Lanjutkan' tidak ditemukan.", worker_tag)
+        return False
+    except Exception:
+        return False
+
+
 async def verify_login_status(page: Page) -> bool:
     """
     Verifikasi apakah sesi di browser saat ini dalam kondisi ter-login di Facebook.
 
+    Catatan penting: FB kadang MENGHAPUS cookie c_user via Set-Cookie header
+    saat halaman pertama dimuat, jika FB mendeteksi sesi invalid (mis. device
+    fingerprint berubah). Jadi keberadaan c_user SEBELUM navigasi bukan jaminan
+    login. Verifikasi dilakukan SETELAH navigasi: cek cookie + cek konten halaman.
+
     Memeriksa:
     - URL: terlempar ke /login, /checkpoint, /recover -> False
-    - Cookie: c_user ada -> True (paling cepat & andal)
-    - Elemen visual: tombol "Go to profile" terlihat -> True
-    - Form login terlihat -> False
+    - Cookie c_user ada SETELAH halaman dimuat -> True (paling andal)
     - Teks checkpoint (2FA, "verify it's you") terdeteksi -> False
+    - Halaman profile-selector (multi-account) -> handle via handle_profile_selector_page
+    - Form login terlihat -> False
     """
     try:
         url_lower = page.url.lower()
         # Cek URL login/checkpoint/recover paling awal (paling cepat)
         if "login" in url_lower or "checkpoint" in url_lower or "recover" in url_lower:
             return False
-        # URL beberapa subdomain yang menandakan tidak login
-        if "/www.facebook.com/login" in url_lower or "/m.facebook.com/login" in url_lower:
-            return False
 
         cookies = await page.context.cookies()
         c_user = any(c.get("name") == "c_user" for c in cookies)
+
         if c_user:
-            # Walau c_user ada, tetap cek apakah halaman menampilkan checkpoint
+            # c_user masih ada setelah halaman dimuat — sesi aktif.
+            # Tetap cek apakah halaman menampilkan checkpoint (2FA, verify identity)
             try:
-                # Coba ambil inner_text body sekali, timeout pendek
                 body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
                 for kw in config.CHECKPOINT_INDICATOR_TEXTS:
                     if kw in body_text:
@@ -316,7 +368,16 @@ async def verify_login_status(page: Page) -> bool:
                 pass
             return True
 
-        # Cek elemen visual indikator login
+        # c_user tidak ada — kemungkinan logged out ATAU di halaman profile-selector.
+        # Coba handle profile-selector dulu (mungkin masih bisa login dengan klik Lanjutkan)
+        handled = await handle_profile_selector_page(page, worker_tag="")
+        if handled:
+            # Re-check cookie setelah handle
+            cookies = await page.context.cookies()
+            if any(c.get("name") == "c_user" for c in cookies):
+                return True
+
+        # Cek elemen visual indikator login (last resort)
         try:
             profile_elem = page.get_by_role("link", name="Go to profile")
             if await profile_elem.count() > 0 and await profile_elem.first.is_visible(timeout=1000):
