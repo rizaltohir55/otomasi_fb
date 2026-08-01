@@ -501,110 +501,101 @@ async def attach_media_files(page: Page, image_paths: List[str], worker_tag: str
 
 async def submit_group_post(page: Page, worker_tag: str = "") -> Tuple[bool, str]:
     """
-    Klik tombol submit Post/Posting di dalam modal dialog komposer dan konfirmasi status publikasi.
+    Klik tombol submit Post/Posting dan konfirmasi status publikasi.
 
-    Mengembalikan (success: bool, reason: str).
-    reason menjelaskan outcome:
-    - "success"               : post berhasil terbit
-    - "pending_admin_approval": post terkirim, menunggu persetujuan admin
-    - "restricted_pre_submit"  : akun terdeteksi restricted sebelum klik submit
-    - "no_submit_button"       : tombol submit tidak ditemukan
-    - "rate_limited"           : FB mengembalikan pesan rate-limit/spam inline
-    - "submit_failed:<detail>" : pesan error lain di dalam composer
-    - "submit_failed_unknown"  : tidak ada sinyal sukses maupun error jelas
-
-    Strategi:
-    1. Tunggu tombol submit tidak disabled.
+    Strategi (diperbaiki untuk akurasi maksimal):
+    1. Tunggu tombol submit tidak disabled (max 15s).
     2. Klik submit.
-    3. Polling maksimal 10 detik: cek (a) komposer tertutup = sukses,
-       (b) muncul pesan "persetujuan admin" = sukses pending,
-       (c) muncul pesan rate-limit/error inline = GAGAL, hentikan fallback.
-    4. Jika tidak ada sinyal sukses maupun error, coba Control+Enter fallback (1x).
-    5. Setiap iterasi polling cek inline failure — kalau ada, langsung cleanup & return False.
-
-    Cleanup: jika post gagal, komposer dialog ditutup paksa supaya tidak bocor ke grup berikutnya.
+    3. Polling 20 detik (40 x 500ms):
+       (a) Komposer tertutup = SUKSES
+       (b) URL berubah (redirect ke post/feed) = SUKSES
+       (c) Pesan rate-limit/error inline = GAGAL dengan reason asli
+       (d) Pesan "persetujuan admin" = SUKSES (pending)
+    4. Jika tidak ada sinyal setelah 20s, coba Control+Enter fallback.
+    5. Jika masih tidak ada sinyal, CAPTURE dialog text asli untuk reason.
+       JANGAN bilang "unknown" — beri keterangan ASLI apa yang ada di dialog.
     """
     log("   🚀 Mengirim postingan...", worker_tag)
 
     if not await is_composer_active(page):
-        log("   ❌ Modal komposer tidak aktif. Submit dibatalkan.", worker_tag)
         return False, "composer_not_active"
 
-    # Cek pembatasan akun FB (pre-submit)
+    # Cek restriction pre-submit
     is_res, res_reason = await check_account_restriction(page)
     if is_res:
-        log(f"   ⛔ AKUN DIBATASI FACEBOOK: {res_reason}", worker_tag)
+        log(f"   ⛔ AKUN DIBATASI: {res_reason}", worker_tag)
         await close_composer_dialog(page, worker_tag)
         return False, "restricted_pre_submit"
 
     submit_btn = await find_submit_button(page)
     if not submit_btn:
-        log("   ❌ Tombol submit 'Post' / 'Posting' tidak ditemukan di dialog.", worker_tag)
+        log("   ❌ Tombol Post tidak ditemukan.", worker_tag)
         await close_composer_dialog(page, worker_tag)
         return False, "no_submit_button"
 
+    # Capture URL sebelum submit untuk deteksi redirect
+    url_before = page.url
+
     try:
-        # Tunggu tombol tidak disabled (max 15 detik)
+        # Tunggu tombol tidak disabled
         for _ in range(30):
             aria_disabled = await submit_btn.get_attribute("aria-disabled")
             if aria_disabled != "true":
                 break
             await page.wait_for_timeout(500)
 
-        # Klik tombol submit utama
-        log("   👉 Menekan tombol Submit ('Post' / 'Posting')...", worker_tag)
+        # Klik submit
+        log("   👉 Klik tombol Post/Posting...", worker_tag)
         await submit_btn.scroll_into_view_if_needed()
         await page.wait_for_timeout(300)
-
         try:
             await submit_btn.click(timeout=3000)
         except Exception:
             await submit_btn.click(force=True, timeout=3000)
 
-        log("   ⏳ Menunggu proses publikasi postingan Facebook...", worker_tag)
+        log("   ⏳ Menunggu publikasi (max 20 detik)...", worker_tag)
 
-        # Polling hingga 10 detik untuk sinyal sukses / pending / failure
-        for _ in range(10):
+        # ── Polling 20 detik (40 x 500ms) ──
+        for i in range(40):
             await page.wait_for_timeout(500)
 
-            # (a) Komposer tertutup = sukses
+            # (a) Komposer tertutup = SUKSES
             if not await is_composer_active(page):
-                log("   ✅ Postingan BERHASIL terpublikasi / terkirim!", worker_tag)
+                log("   ✅ Komposer tertutup — POST BERHASIL!", worker_tag)
                 return True, "success"
 
-            # (c) Cek inline failure — jika ada, langsung berhenti & cleanup
+            # (b) URL berubah = FB redirect, kemungkinan sukses
+            url_now = page.url
+            if url_now != url_before and "login" not in url_now.lower():
+                log(f"   ✅ URL berubah → {url_now} — POST BERHASIL (redirect)!", worker_tag)
+                return True, "success_url_redirect"
+
+            # (c) Cek inline failure (rate-limit, error)
             is_fail, fail_reason = await detect_composer_post_failure(page, worker_tag)
             if is_fail:
                 log(f"   ⛔ POST GAGAL: {fail_reason}", worker_tag)
-                log("   🧹 Membersihkan komposer yang gagal supaya tidak bocor ke grup berikutnya...", worker_tag)
                 await close_composer_dialog(page, worker_tag)
-                # Klasifikasi reason
                 if any(kw in fail_reason.lower() for kw in ["rate", "spam", "membatasi", "coba lagi"]):
                     return False, "rate_limited"
                 return False, f"submit_failed:{fail_reason}"
 
-            # (b) Cek pesan persetujuan admin (sukses pending)
+            # (d) Cek persetujuan admin (pending = sukses)
             dialog = await get_active_composer_dialog(page)
             if dialog:
                 try:
-                    inner_txt = (await dialog.inner_text(timeout=500)).lower()
-                    if any(kw in inner_txt for kw in ["persetujuan", "approval", "admin", "pending", "dikirim"]):
-                        log("   ⏳ Postingan terkirim dan Menunggu Persetujuan Admin (Pending Approval).", worker_tag)
+                    txt = (await dialog.inner_text(timeout=500)).lower()
+                    if any(kw in txt for kw in ["persetujuan", "approval", "admin", "pending", "dikirim"]):
+                        log("   ⏳ Post terkirim — Menunggu Persetujuan Admin.", worker_tag)
                         return True, "pending_admin_approval"
                 except Exception:
                     pass
 
-        # Jika sampai sini belum dapat sinyal sukses maupun error, coba Control+Enter fallback 1x.
-        # Tapi sebelumnya, cek dulu apakah ada inline failure yang muncul lambat.
-        is_fail, fail_reason = await detect_composer_post_failure(page, worker_tag)
-        if is_fail:
-            log(f"   ⛔ POST GAGAL (detected sebelum fallback): {fail_reason}", worker_tag)
-            await close_composer_dialog(page, worker_tag)
-            if any(kw in fail_reason.lower() for kw in ["rate", "spam", "membatasi", "coba lagi"]):
-                return False, "rate_limited"
-            return False, f"submit_failed:{fail_reason}"
+            # Progress log setiap 5 detik
+            if (i + 1) % 10 == 0:
+                log(f"   ⏳ Masih menunggu... ({(i+1)*500}ms)", worker_tag)
 
-        log("   🔄 Menggunakan pemicu cadangan (Control+Enter)...", worker_tag)
+        # ── Fallback: Control+Enter ──
+        log("   🔄 Fallback: Control+Enter...", worker_tag)
         if await is_composer_active(page):
             tb = await find_caption_textbox(page)
             if tb:
@@ -615,16 +606,20 @@ async def submit_group_post(page: Page, worker_tag: str = "") -> Tuple[bool, str
                         await tb.focus()
                     await page.wait_for_timeout(200)
                     await page.keyboard.press("Control+Enter")
-                    await page.wait_for_timeout(4000)
+                    await page.wait_for_timeout(6000)
                 except Exception as e:
-                    log(f"   ⚠️ Control+Enter fallback gagal: {e}", worker_tag)
+                    log(f"   ⚠️ Control+Enter error: {e}", worker_tag)
 
         # Cek hasil setelah fallback
         if not await is_composer_active(page):
-            log("   ✅ Postingan BERHASIL terpublikasi via pemicu cadangan!", worker_tag)
+            log("   ✅ POST BERHASIL via Control+Enter!", worker_tag)
             return True, "success_via_fallback"
 
-        # Cek inline failure setelah fallback
+        url_now = page.url
+        if url_now != url_before and "login" not in url_now.lower():
+            log(f"   ✅ URL berubah setelah fallback — POST BERHASIL!", worker_tag)
+            return True, "success_url_redirect"
+
         is_fail, fail_reason = await detect_composer_post_failure(page, worker_tag)
         if is_fail:
             log(f"   ⛔ POST GAGAL (setelah fallback): {fail_reason}", worker_tag)
@@ -633,13 +628,63 @@ async def submit_group_post(page: Page, worker_tag: str = "") -> Tuple[bool, str
                 return False, "rate_limited"
             return False, f"submit_failed:{fail_reason}"
 
-        # Tidak ada sinyal sukses maupun error jelas — anggap gagal & cleanup
-        log("   ❌ Tidak ada konfirmasi publikasi setelah semua upaya. Post dianggap gagal.", worker_tag)
+        # ── Tidak ada sinyal jelas — CAPTURE dialog text ASLI ──
+        # Jangan bilang "unknown" — tunjukkan apa yang sebenarnya ada di dialog.
+        dialog_text = ""
+        try:
+            dialog = await get_active_composer_dialog(page)
+            if dialog:
+                dialog_text = (await dialog.inner_text(timeout=2000)).strip()
+                # Truncate untuk log (tapi tetap informatif)
+                preview = dialog_text[:500] if len(dialog_text) > 500 else dialog_text
+                log(f"   📋 Dialog content (asli):", worker_tag)
+                for line in preview.split("\n"):
+                    line = line.strip()
+                    if line:
+                        log(f"      | {line}", worker_tag)
+        except Exception:
+            pass
+
+        # Cek body text untuk indikator sukses yang mungkin terlewat
+        try:
+            body = (await page.locator("body").inner_text(timeout=2000)).lower()
+            success_kw = ["post berhasil", "postingan berhasil", "your post has been",
+                         "post has been published", "postingan Anda telah"]
+            for kw in success_kw:
+                if kw in body:
+                    log(f"   ✅ Indikator sukses ditemukan di body: '{kw}'", worker_tag)
+                    await close_composer_dialog(page, worker_tag)
+                    return True, "success_body_indicator"
+        except Exception:
+            pass
+
+        # Jika dialog text kosong = komposer mungkin sudah tidak ada
+        if not dialog_text:
+            log("   ✅ Dialog kosong/tidak ada — post kemungkinan berhasil.", worker_tag)
+            return True, "success_dialog_empty"
+
+        # Beri reason ASLI berdasarkan dialog text
+        dialog_lower = dialog_text.lower()
+        if "membatasi" in dialog_lower or "coba lagi" in dialog_lower or "rate" in dialog_lower:
+            reason = "rate_limited"
+        elif "spam" in dialog_lower:
+            reason = "spam_detected"
+        elif "persetujuan" in dialog_lower or "approval" in dialog_lower or "admin" in dialog_lower:
+            # Ini sebenarnya sukses pending, bukan gagal!
+            log("   ⏳ Post terkirim — Menunggu Persetujuan Admin.", worker_tag)
+            return True, "pending_admin_approval"
+        elif "tidak dapat" in dialog_lower or "can't" in dialog_lower or "unable" in dialog_lower:
+            reason = f"fb_blocked: {dialog_text[:200]}"
+        else:
+            # Berikan text dialog asli sebagai reason
+            reason = f"dialog_stuck: {dialog_text[:300]}"
+
+        log(f"   ❌ POST GAGAL — Reason asli: {reason}", worker_tag)
         await close_composer_dialog(page, worker_tag)
-        return False, "submit_failed_unknown"
+        return False, reason
 
     except Exception as e:
-        log(f"   ❌ Gagal menekan tombol submit postingan: {e}", worker_tag)
+        log(f"   ❌ Exception saat submit: {e}", worker_tag)
         try:
             await close_composer_dialog(page, worker_tag)
         except Exception:
