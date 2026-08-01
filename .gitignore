@@ -1,35 +1,11 @@
-# ── Runtime files ─────────────────────────────────────────────────────────────
-# File daemon lokal — tidak pernah di-commit
-server.log
-server.pid
-*.tmp
+__pycache__/
+*.pyc
+*.pyo
 *.bak
 *.corrupt.*
-
-# ── Activity log (append-only, terlalu besar untuk VCS) ───────────────────────
+server.log
+server.pid
 logs/activity.log
-
-# ── Skip-list grup (di-generate saat runtime) ─────────────────────────────────
-data/group_skip_list.txt
-
-# ── Python cache & venv ───────────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-env/
-
-# ── IDE / Editor ──────────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
-.DS_Store
-
-# ── Playwright ────────────────────────────────────────────────────────────────
-.cache/ms-playwright/
-session_progress_
 data/session_progress_*.json
+data/group_skip_list.txt
+.vscode/

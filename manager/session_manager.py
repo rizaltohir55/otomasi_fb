@@ -497,7 +497,7 @@ async def verify_session_live_status(session_file: str) -> Dict[str, Any]:
 
     # ── 2. Verifikasi via Playwright headless ──────────────────────────────
     # Jalankan di thread terpisah dengan event loop baru agar tidak conflict
-    # dengan event loop FastAPI utama.
+    # dengan event loop utama.
     def playwright_check() -> Tuple[str, str]:
         from playwright.async_api import async_playwright
         from engine.browser import create_stealth_context, verify_login_status, check_account_restriction

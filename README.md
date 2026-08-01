@@ -1,144 +1,102 @@
-# 🌐 FB AutoEngine 3.0 Ultra
+# 🌐 FB AutoEngine 3.0 Ultra — Terminal Only
 
-> **Enterprise-Grade Facebook Group Auto-Poster, Auto-Joiner & Multi-Account Automation Engine**
-> Powered by Pure Desktop React ARIA Automation, Intelligent Stealth, and Parallel Multiprocessing.
-
----
-
-## 📌 Deskripsi Proyek
-
-**FB AutoEngine 3.0 Ultra** adalah sistem otomatisasi Facebook tingkat lanjut yang dirancang khusus untuk mempublikasikan postingan (teks & gambar) serta bergabung (*auto-join*) ke ratusan Grup Facebook secara otomatis, aman, dan efisien.
-
-Engine versi 3.0 ini mengusung teknologi **Pure Desktop React ARIA DOM Intelligence** yang kebal terhadap perubahan nama class acak (*obfuscated class names*) Facebook, serta menghilangkan kebergantungan pada domain `mbasic` atau `mobile` untuk menghindari *security loop / bot detection* (`?_rdr`).
+> Otomasi posting & join grup Facebook via terminal CLI.
 
 ---
 
-## ⚡ Fitur Utama
+## 📌 Deskripsi
 
-- **🚀 Dual-Engine Execution (Single & Multi-Account Parallel)**:
-  Mendukung eksekusi 1 akun maupun banyak akun Facebook secara bersamaan menggunakan *multiprocessing pool*.
-- **🎯 Pure Desktop React ARIA DOM Intelligence**:
-  Navigasi presisi berbasis ARIA roles (`role="main"`, `role="dialog"`, `role="button"`, `div[contenteditable="true"]`) yang dinamis dan kebal update UI Facebook.
-- **🖼️ Smart Media & Photo Upload Engine**:
-  Penanganan pengunggahan gambar yang presisi langsung ke dalam modal komposer utama tanpa risiko terlampir di kolom komentar lain.
-- **➕ Automatic Group Joiner & Q&A Solver**:
-  Mendeteksi status keanggotaan grup (`JOINED`, `PENDING`, `UNJOINED`) dan menjawab kuesioner/aturan grup secara otomatis sebelum memposting.
-- **🛡️ Advanced Stealth Shield**:
-  Proteksi anti-deteksi bot (Chromium automation flags evasion, randomized viewport, realistic human typing emulation, CDP native click events).
-- **📊 Real-time Terminal Dashboard**:
-  Tampilan CLI interaktif yang informatif, berwarna, dan dilengkapi laporan pengujian unit komprehensif.
+Sistem otomatisasi Facebook berbasis Playwright yang berjalan **hanya via terminal**.
+Tidak ada web server, tidak ada dashboard web — murni CLI.
 
----
+## ⚡ Fitur
 
-## 📁 Struktur Direktori
+- **Auto Post** ke ratusan grup Facebook (teks + gambar)
+- **Auto Join** grup otomatis + jawab Q&A admin
+- **Multi-Account Paralel** via multiprocessing
+- **Stealth Engine** (fingerprint spoofing, anti-detection)
+- **Session Management** (login, relogin, import cookie)
+- **Anti-Duplikasi** (file lock + session progress tracking)
+- **Cooldown Restriction** (akun kena rate-limit auto-pause 30 menit)
 
-```text
-otomasiFB/
-├── autopost.py               # Entry point utama (CLI & Interactive Dashboard)
-├── config.py                 # Konfigurasi terpusat (Timing, Stealth, Texts)
-├── test_all.py               # Suite pengujian otomatis komprehensif (43 Test Cases)
-├── caption.txt               # File teks caption postingan
-├── groups.txt                # Daftar URL grup target (500+ link)
-├── data/                     # Folder data referensi
-├── media/                    # Folder tempat gambar postingan (.jpg, .png, .webp)
-├── session/                  # Penyimpanan file sesi login Facebook (*.json)
-├── logs/                     # Catatan aktivitas & log eksekusi
-├── engine/                   # Core Engine Modules
-│   ├── dom_analyzer.py       # Traversal ARIA DOM cerdas & penapis overlay
-│   ├── composer.py           # Pembuat postingan, uploader gambar & submitter
-│   ├── joiner.py             # Pemeriksa status keanggotaan & auto-joiner
-│   ├── browser.py            # Launcher browser stealth & sesi cookie
-│   ├── collector.py          # Pengumpul grup & file media
-│   └── selectors.py          # Registry selektor ARIA multi-bahasa (ID/EN)
-├── manager/                  # Task & Worker Managers
-│   ├── runner.py             # Eksekutor loop worker & multiprocessing pool
-│   └── session_manager.py    # Pengelola login & penemu file sesi
-└── ui/                       # Dashboard Interface
-    └── dashboard.py          # Tampilkan banner & menu interaktif
-```
-
----
-
-## 🚀 Cara Penggunaan
-
-### 1. Persyaratan Sistem
-- Python 3.9+
-- Playwright Chromium (`pip install playwright && playwright install chromium`)
-
-### 2. Jalankan Mode Interaktif
-```powershell
-python autopost.py
-```
-
-### 3. Login Akun Baru via Terminal (Lokal)
-
-Jika server otomasi berjalan di server **remote/headless** (tanpa display),
-Anda tidak bisa login akun baru via web dashboard (browser GUI tidak bisa
-ditampilkan). Gunakan script `login_terminal.py` di **komputer lokal** Anda:
+## 🚀 Quick Start
 
 ```bash
-# Clone repo ke komputer lokal
+# Clone
 git clone https://github.com/rizaltohir55/otomasi_fb.git
 cd otomasi_fb
 
-# Install dependencies
+# Install
 pip install -r requirements.txt
 playwright install chromium
 
-# Jalankan script login (menu interaktif)
-python login_terminal.py
-
-# Atau langsung login akun baru tanpa menu
-python login_terminal.py --new
-
-# Atau relogin akun existing
-python login_terminal.py --relogin session/fb_session_kayy_andromeda.json
+# Jalankan (menu interaktif)
+python autopost.py
 ```
 
-Script akan:
-1. Membuka browser Chromium GUI di komputer Anda
-2. Navigasi ke facebook.com
-3. Menunggu Anda login manual (max 4 menit)
-4. Otomatis menyimpan cookie sesi ke `session/fb_session_*.json`
+## 📋 Cara Pakai
 
-Setelah login berhasil, **copy file sesi JSON ke server otomasi**:
+### Login Akun Baru
 ```bash
-# Via scp
-scp session/fb_session_*.json user@server:/path/to/otomasi_fb/session/
-
-# Atau via git
-git add session/fb_session_*.json
-git commit -m "Add new session"
-git push origin main
+python login_terminal.py
+# Browser terbuka → login Facebook → cookie tersimpan otomatis
 ```
 
-> ℹ️ **Alternatif tanpa script**: Buka Facebook di browser Chrome/Firefox,
-> login, install extension [EditThisCookie](https://chrome.google.com/webstore/detail/editthiscookie/eemnbcpgkiklojnimhbbekjmbfkdkkoc),
-> export cookie sebagai JSON, lalu klik tombol **"Import Sesi"** di web dashboard.
+### Jalankan Otomasi
+```bash
+# Menu interaktif (pilih akun, mode, dll)
+python autopost.py
 
-### 4. Jalankan Mode CLI (Otomatis)
-- **Jalankan Akun Spesifik (Mode 3: Auto Post + Auto Join)**:
-  ```powershell
-  python autopost.py --session session/fb_session_raden_mas.json --mode 3
-  ```
-- **Jalankan Seluruh Akun Secara Paralel (Headless)**:
-  ```powershell
-  python autopost.py --all-accounts --mode 3 --headless
-  ```
+# CLI langsung — 1 akun, mode post
+python autopost.py --session session/fb_session_kayy.json --mode 1 --headless
 
----
+# CLI — semua akun paralel
+python autopost.py --all-accounts --mode 3 --headless --max-workers 3
 
-## 🧪 Pengujian Sistem
-
-Untuk memastikan seluruh fungsi engine berjalan 100% tanpa kendala:
-```powershell
-python test_all.py
+# CLI — range grup tertentu
+python autopost.py --accounts 1 --mode 1 --start 1 --end 50
 ```
 
----
+### Mode Operasi
+- `1` = Auto Post saja
+- `2` = Auto Join saja
+- `3` = Auto Post + Auto Join (join otomatis jika belum anggota)
 
-## 🔒 Keamanan & Anti-Banned
+## 📁 Struktur
 
-- Gunakan jeda antar grup yang wajar (`3.0` s/d `6.0` detik di `config.py`).
-- Batasi jumlah posting harian per akun agar tetap terlihat seperti aktivitas manusia alami.
-- Pastikan file sesi `session/*.json` tersimpan dengan aman dan tidak dibagikan secara publik.
+```
+otomasi_fb/
+├── autopost.py              # Entry point CLI
+├── login_terminal.py        # Login akun baru via browser GUI
+├── config.py                # Konfigurasi terpusat
+├── caption.txt              # Caption postingan
+├── groups.txt               # Daftar URL grup target
+├── requirements.txt         # Dependencies (playwright only)
+├── engine/                  # Core automation
+│   ├── browser.py           # Stealth browser context
+│   ├── composer.py          # Post creation & submit
+│   ├── joiner.py            # Group join automation
+│   ├── commenter.py         # Auto comment
+│   ├── collector.py         # Load groups/caption/media
+│   ├── dom_analyzer.py      # ARIA DOM analysis
+│   └── selectors.py         # CSS/ARIA selectors
+├── manager/
+│   ├── runner.py            # Worker loop (single & multi-process)
+│   └── session_manager.py   # Session CRUD + verify
+├── utils/
+│   ├── helpers.py           # Logging, URL normalize, account lock
+│   ├── browser.py           # Navigation helpers
+│   ├── files.py             # File utilities
+│   └── retry.py             # Cooldown, skip-list, media validator
+├── ui/
+│   └── dashboard.py         # CLI menu interaktif
+├── session/                 # File sesi JSON (*.json)
+├── media/                   # Gambar untuk posting
+└── logs/                    # Activity log
+```
+
+## 🔒 Keamanan
+
+- Gunakan jeda antar grup yang wajar (atur di `config.py`)
+- Batasi jumlah posting harian per akun
+- Jangan bagikan file sesi `session/*.json`
