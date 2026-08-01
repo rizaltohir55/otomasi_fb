@@ -1,0 +1,103 @@
+[
+  {
+    "ariaLabel": null,
+    "className": "x1n2onr6 x1ja2u2z x1afcbsf x78zum5 xdt5ytf x1a2a7pz x6ikm8r x10wlt62 x71s49j x1jx94hy xw5cjc7 x1dmpuos x1vsv7so xau1kf4 x104qc98 x15o3w11 xogydr4 x1vmz7ll x1yyrj1m x193iq5w",
+    "buttons": [
+      {
+        "ariaLabel": "Tutup dialog komposer",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Edit privasi. Berbagi dengan Grup publik. ",
+        "ariaDisabled": "true",
+        "innerText": "Grup publik",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Tampilkan Opsi Latar Belakang",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Emoji",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Tambahkan ke postingan Anda",
+        "ariaDisabled": null,
+        "innerText": "Tambahkan ke postingan Anda",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Foto/video",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Tandai orang",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Singgah",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Perasaan/aktivitas",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Opsi postingan lainnya",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      },
+      {
+        "ariaLabel": "Posting",
+        "ariaDisabled": "true",
+        "innerText": "Posting",
+        "role": "button"
+      }
+    ],
+    "textboxes": [
+      {
+        "ariaLabel": null,
+        "role": "textbox",
+        "contentEditable": "true",
+        "innerText": " "
+      }
+    ],
+    "fileInputs": [
+      {
+        "name": "",
+        "multiple": true,
+        "accept": "image/*,image/heif,image/heic,video/*,video/mp4,video/x-m4v,video/x-matroska,.mkv,.avi,.wmv,.mov,.flv,.webm,.3gp,.3g2,.mts,.m2ts,.vob,.divx,.f4v,.ogv"
+      }
+    ]
+  },
+  {
+    "ariaLabel": "Buat postingan",
+    "className": "",
+    "buttons": [
+      {
+        "ariaLabel": "Tutup dialog komposer",
+        "ariaDisabled": null,
+        "innerText": "",
+        "role": "button"
+      }
+    ],
+    "textboxes": [],
+    "fileInputs": []
+  }
+]

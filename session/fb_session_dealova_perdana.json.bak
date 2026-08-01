@@ -1,0 +1,116 @@
+{
+  "cookies": [
+    {
+      "name": "_GRECAPTCHA",
+      "value": "09AKhCRwgLkpcOQfn_2CVLcpkRbbOm2zAGR0sbdbKcDpWAhe0BX7O50D3qcu3O8NxFtCl04QKR7ro9Shgj0kanM50",
+      "domain": "www.google.com",
+      "path": "/recaptcha",
+      "expires": 1800991120.188842,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "datr",
+      "value": "bqNran-ybevu32GnxZ2Nk5Bi",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819999085.431456,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "sb",
+      "value": "bqNrat383BhTsdLOrCOT1omu",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819999131.87612,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "wd",
+      "value": "1366x768",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1786043918,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "c_user",
+      "value": "61588711091422",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816975131.87584,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "xs",
+      "value": "39%3A2ComRWvlkciSkA%3A2%3A1785439130%3A-1%3A-1",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816975131.876241,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.facebook.com",
+      "localStorage": [
+        {
+          "name": "signal_flush_timestamp",
+          "value": "1785439090979"
+        },
+        {
+          "name": "falco_queue_immediately^$^$fd4450f9b60f8b787",
+          "value": "{\"items\":[{\"name\":\"web_time_spent_navigation\",\"policy\":{\"r\":1},\"time\":1785439134404.55,\"extra\":\"{\\\"cause\\\":\\\"unload\\\",\\\"custom_data_json\\\":\\\"{\\\\\\\"source_pa\\\\\\\":\\\\\\\"{\\\\\\\\\\\\\\\"0\\\\\\\\\\\\\\\":{\\\\\\\\\\\\\\\"bookmark_id\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"tp-two_step_verification.pre_authentication\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"bookmark_type_name\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"session\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"fl7uor:ye2wpu:bifxak\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"subsession\\\\\\\\\\\\\\\":1,\\\\\\\\\\\\\\\"tap_point\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"via_cold_start\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"timestamp\\\\\\\\\\\\\\\":1785439115344,\\\\\\\\\\\\\\\"trace_policy\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"two_step_verification.pre_authentication\\\\\\\\\\\\\\\"}}\\\\\\\",\\\\\\\"source_pav2\\\\\\\":\\\\\\\"TwoStepVerificationRoot.react,two_step_verification.pre_authentication,via_cold_start,1785439115344,141204,,,\\\\\\\",\\\\\\\"source_uri\\\\\\\":\\\\\\\"/two_step_verification/authentication/?encrypted_context=AWSCNayjoKFSkjtgjQAj4XWo-KVq_8M_66BiQs6i_qrtoJaCjp5CYBvro4CLT_OUeiWodPRb-3TCdWmtTZsa-0e80B_NPi0gTi1PCvkjI6iDygyLoyOPZPP1Qr0WhkTVPMoimUyuCpwIs0_UBOm4DKa48ZtvjDizg2hwKzWo15ImiuXLF233fI7xCqbXLDBJ7zE0FjO6FLHyG9O0yyIgDaC8whqPqPruChoZawneqUW3_xiVk87nVqJuwf9Q8XVhmNcUgHJoaZLUqHl2xRhH1YHzrmTk5aclXXPOrq-hjcduSkZJOPhpSZgg3Qh6yNFKsCe24kUMCp4NizxuS_3RXc8YNlO_hp-tR0E3-rNIkE8adjelfd-pKGkka2jNeiBLTn91o7XrTpJMWDScLDoHNl9bU8RKAOjAOo0DMnsspxrrILfxKUrhVS3WJQC8z6y3ti6Y_m4-bnPLTly5ymReW1P1oa4nLfXKGx5baLZxFpFduRDPfocNitszDJ6frdbgLJi0Cpe_2BLxmtQx5WvJYbXH8gqvpwJAbMygE0PqUMYtstMSjPkylT_ctF6xPzKSYIOcAfZFTBxPll5dvyVCNsopNTk7rmlawjYJek04Y2rtSqsY9G-Nfbu-ilEAdupSFViQhDH-QARzQZOt_Z_kgqICCuwPpmF9QjoLHBa2SSz774PdwX96Bn80a8yx-9x_39FvC1Qng3i6_1opzZR5P2rpAnxanvnWPOXUr6UynWsfe96HYf8IpPov-thfYcM-rbQx1TfKTyzgDJ2wb4Cd418gKh3zXMle9mm6zDVjCgTjApJxxmo8puhRTcBkVkgmjlLLEfk74sx96XXqLnpxADNtFfYDeNAG-iBzCg58dMVp4XZ7CJsn1mErEUGUFSfLn4PbNrSX7Xnim_oXvDSdp3JkSK4tcZhpZDKMJj81Yeg9U44e4SJBLjJe0_Y-4cXo2s6_NVoFCodSlLcUrWdegUPAndsxhaVqLCoeLBOtH-r0Inao-Je5ocEtMSETJINdb5ayPwly5VJtxwNe8DokdwekBiKxpqEHr47bDELyfpzonK6UKIXg6GOjtUeY90M6pUt3C02e6ACw2FcMgxwfFBqlD27ZRR2q9AelnjTWVdCSQTfGhRAKjljf30KrTs92-AqYd7t3S8P84I33h2YsQ2wi2w4POZCHpWvm1t81aefsWtFn6VYvX1_7acCiRhHjavRRftG8knoywAHzmf7HlWhqs_XzTjg53vm1yNlD8pCPYrKZMdDlP1s5-AFSWx0wKZdHnHTVEk3g159UPrMR4s7DvAV4NYQhwfUtYpP08uthmQc0HFq7LMRnC57LDMOs41qHguObmuy36B_DgYgLbnCw3wxI7ap6PmpBuu8AS2inAbaz0pHsExp3Y8CjlFD26Yqi4B9ZpR56LnqzlehD-ugLDnxC7F5d3uMFjHRIrxoBaU77tBIpu0yBbBxaKKTnxRSnE-oh6k_9qz6-CPS_wQjJQBR1zh7ul3xVBRbT0crZMcpcALe4x3qq7fdrzGTrU6wSm9yO7fp3LB--thaayP5e0yIrBKVYzHeSo5meipt2ZyJ6MHhflDhv4q8QditQ8IuKO2BnbB8rtgh52JFqNMZYbVlBWK2f2kgN_IdFeQ&flow=pre_authentication&next\\\\\\\",\\\\\\\"source_imp_id\\\\\\\":\\\\\\\"0qTm71bwBgT1foAJV\\\\\\\",\\\\\\\"source_visitation_id\\\\\\\":\\\\\\\"two_step_verification.pre_authentication:bifxak:1:1785439115.347\\\\\\\"}\\\",\\\"sid_raw\\\":\\\"fl7uor:ye2wpu:bifxak\\\",\\\"source_path\\\":\\\"two_step_verification.pre_authentication\\\"}\",\"tags\":[1,128],\"sessionId\":\"fl7uor:ye2wpu:bifxak\",\"deviceId\":\"fd.ARtTmd70Ixh-P_RP10uKJYjR8oblwU319Ct_mJCiIgEZC9Jx4rSo0STs1GxLEH_5Mnuil-WkfxCMVA0QRvsOpOxQ\",\"appVersion\":\"1044.165.744.0 (1044165744)\"}],\"ts\":1785439132800.7002}"
+        },
+        {
+          "name": "Session",
+          "value": "fl7uor:1785439167800"
+        },
+        {
+          "name": "hb_timestamp",
+          "value": "1785439090912"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1785439090981.9001"
+        }
+      ]
+    },
+    {
+      "origin": "https://www.fbsbx.com",
+      "localStorage": [
+        {
+          "name": "_grecaptcha",
+          "value": "09AKhCRwj2Wzjxf37wSdfgmo2N508ZOU4-4mrTSo1xGGfq-YrHL8n2mWBW1yyRLcVo3tr4CZuwP3AhciU9WqXpaRwNS8r05m8M0kCcGZ0pJKNr1oAue4lnSOv_ws1bMmeH"
+        }
+      ]
+    },
+    {
+      "origin": "https://www.google.com",
+      "localStorage": [
+        {
+          "name": "rc::a",
+          "value": "Y3NvamgwMWNia2J1bQ=="
+        },
+        {
+          "name": "rc::f",
+          "value": "0aAJb5713jrGEiion0k5S8vKrj3DVdYehHHPQRfM8zGfiPS7vzo2NcS3n6jKsDV2Fw5hbor6U"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "name": "Margono Djoyohadikusumo (Sesi Mismatch / Perlu Login Dealova)"
+  }
+}

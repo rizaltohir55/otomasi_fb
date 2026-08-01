@@ -1,0 +1,102 @@
+{
+  "cookies": [
+    {
+      "name": "datr",
+      "value": "Gd1paqU9awCIPLRX5TDYkO2r",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819882772.759552,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "sb",
+      "value": "Gd1pagA2ZjsgRe2K5nezt-Fj",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819882788.436683,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "wd",
+      "value": "1366x768",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1785927577,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "c_user",
+      "value": "61588711091422",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816858791.72101,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "fr",
+      "value": "1gjNtcgRefSDCDiRY.AWf3jvx9yhUp8mcpFv_BBbbbVEDP8xSqvhJ0pc7i5Qdpqz6syR0.Bqad0s..AAA.0.0.Bqad0s.AWfojLAdg4wbkehg0JVmRYxXD5g",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1793098791.721843,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "xs",
+      "value": "34%3ARbcIqCNoFevAug%3A2%3A1785322791%3A-1%3A-1%3A%3AAcwBMzdq-7zxEV1_TgO27nuQ7fqzkRO8nYk_CI9yKA",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816858791.722079,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.facebook.com",
+      "localStorage": [
+        {
+          "name": "screen_time_period_logging_facebook",
+          "value": "{\"actorId\":\"61588711091422\",\"currentIntervalLastTick\":null,\"currentIntervalStart\":null,\"initRemoteAgg\":{\"timestamp\":1785322607,\"today_s\":104},\"intervals\":[],\"lastCallbackAttempt\":null,\"localStorageId\":\"24235980\",\"syncedL24HS\":null,\"syncedTodayS\":null}"
+        },
+        {
+          "name": "last_headload_time",
+          "value": "1785322792283"
+        },
+        {
+          "name": "hb_timestamp",
+          "value": "1785322777976"
+        },
+        {
+          "name": "mw_encrypted_backups_restore_upsell_first_impression_time_key",
+          "value": "1785322791334"
+        },
+        {
+          "name": "signal_flush_timestamp",
+          "value": "1785322778032"
+        },
+        {
+          "name": "Session",
+          "value": "2a0nd3:1785322827523"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1785322777761"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "name": "Margono Djoyohadikusumo"
+  }
+}

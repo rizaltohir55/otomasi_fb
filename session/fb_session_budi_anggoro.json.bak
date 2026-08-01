@@ -1,0 +1,90 @@
+{
+  "cookies": [
+    {
+      "name": "datr",
+      "value": "TnBpaqvvV5Zwr2LirSSEwAbz",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819854922.4434,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "sb",
+      "value": "TnBpaqmAqQArcFA4dcff6XA6",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1819854935.96815,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "wd",
+      "value": "1366x768",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1785899724,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "c_user",
+      "value": "61592569952412",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816830935.967915,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "fr",
+      "value": "0gZHQYDtAsR5hgYLW.AWfBanaNnRZHQ59S-vgZJaVCFNRCxbuwqp_SAn8oMq0zmQ97xy0.BqaXBO..AAA.0.0.BqaXBY.AWfLWGgF4wndwLa2q9ZZMwd5HZ4",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1793070935.968051,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "xs",
+      "value": "44%3AmvEaDixr8tmShw%3A2%3A1785294938%3A-1%3A-1",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1816830935.968242,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.facebook.com",
+      "localStorage": [
+        {
+          "name": "signal_flush_timestamp",
+          "value": "1785294924769"
+        },
+        {
+          "name": "Session",
+          "value": "nci1m3:1785294972587"
+        },
+        {
+          "name": "hb_timestamp",
+          "value": "1785294924674"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1785294925860.7998"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "name": "Budi Anggoro"
+  }
+}

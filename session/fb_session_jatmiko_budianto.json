@@ -1,0 +1,142 @@
+{
+  "cookies": [
+    {
+      "name": "datr",
+      "value": "kSNsahRQCAr1WaeWGUrf0B2N",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1820031886.586158,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "sb",
+      "value": "kSNsakPK40isqZT06B0-kfHr",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1820031897.852063,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "wd",
+      "value": "1366x768",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1786076689,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "csrftoken",
+      "value": "_iX3-2BQ2cyNhGyd6_SI0D",
+      "domain": ".instagram.com",
+      "path": "/",
+      "expires": 1820031889.634153,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "mid",
+      "value": "amwjlAALAAFF1lfQCRhXNhiIB_Xh",
+      "domain": ".instagram.com",
+      "path": "/",
+      "expires": 1820031889.63462,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "c_user",
+      "value": "61592505098884",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1817007897.851805,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "xs",
+      "value": "29%3AvOYi9g22lcxo-Q%3A2%3A1785471898%3A-1%3A-1",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1817007897.852157,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "fr",
+      "value": "0MgJTPY2NpW6elRyD.AWclgA-NR3ur7hwiXJZidt2BlXtuikzi36YdO-0k6fpAbq_wRRY.BqbCOR..AAA.0.0.BqbCOc.AWco3l4CLqXQpemDeZyGze8Eep0",
+      "domain": ".facebook.com",
+      "path": "/",
+      "expires": 1793247898.393167,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://web.facebook.com",
+      "localStorage": [
+        {
+          "name": "mutex_falco_queue_critical^$^$",
+          "value": "33nyln:1785471900947"
+        },
+        {
+          "name": "hb_timestamp",
+          "value": "1785471889234"
+        },
+        {
+          "name": "mutex_screen_time_period_logging_mutex_61592505098884_facebook",
+          "value": "33nyln:1785471914939"
+        },
+        {
+          "name": "mutex_falco_queue_immediately^$61592505098884^#61592505098884^#^#hmac_ttl.1785471900.AR1Db6dduAQA1zrNniq3nQGr0PHH46H5zQnGMUgcczz03pcu^$",
+          "value": "33nyln:1785471900947"
+        },
+        {
+          "name": "signal_flush_timestamp",
+          "value": "1785471889272"
+        },
+        {
+          "name": "falco_queue_critical^$^$f10054ad44ba898b1",
+          "value": "{\"items\":[{\"name\":\"ods_web_batch\",\"policy\":{\"r\":1,\"s\":1},\"time\":1785471901213.1,\"extra\":\"{\\\"batch\\\":{\\\"7173\\\":{\\\"entities.ff_js_web.web_time_spent_bit_array.2220391788200892.1044.C3\\\":{\\\"event.logged\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.upload_method.banzai.log_immediately\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.banzai.log_immediately.upload_processing\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.uploaded\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.captured\\\":{\\\"n\\\":1,\\\"d\\\":null}},\\\"entities.ff_js_web.caa_login_client_events_fb_msgr.2220391788200892.1044.C3\\\":{\\\"event.logged\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.upload_method.banzai.log_immediately\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.banzai.log_immediately.upload_processing\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.uploaded\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.captured\\\":{\\\"n\\\":1,\\\"d\\\":null}},\\\"entities.ff_js_web.perf.2220391788200892.1044.C3\\\":{\\\"event.logged\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.upload_method.banzai.log_immediately\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.info.banzai.log_immediately.upload_processing\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.uploaded\\\":{\\\"n\\\":1,\\\"d\\\":null},\\\"event.captured\\\":{\\\"n\\\":1,\\\"d\\\":null}}}}}\",\"tags\":[1,128],\"sessionId\":\"crjesb:mqpb96:ra3ifp\",\"deviceId\":\"fd.ARs-dDujM9CTOOAIAR_QHK1_vcHnThvpVSFyUC-kJH8Kw-F19blPCtLmQVhkKZeMWlmPLmgEfhzq7Uqu2C-k2PXO\",\"appVersion\":\"1044.214.717.0 (1044214717)\"}],\"ts\":1785471898450.7998}"
+        },
+        {
+          "name": "falco_queue_immediately^$^$fe11f72c821d1294f",
+          "value": "{\"items\":[{\"name\":\"perf\",\"policy\":{\"r\":1,\"s\":1},\"time\":1785471901214.4,\"extra\":\"{\\\"marker_id\\\":175125627,\\\"action_id\\\":706,\\\"instance_id\\\":0,\\\"sample_rate\\\":1,\\\"method\\\":\\\"random_sampling\\\",\\\"duration_ns\\\":\\\"5788399902\\\",\\\"points\\\":[],\\\"metadata\\\":{\\\"application_analytics\\\":{\\\"time_since_qpl_module_init\\\":9476.599853515625},\\\"memory_stats\\\":{\\\"total_mem\\\":8589934592},\\\"network_stats\\\":{\\\"downlink_megabits\\\":1.45,\\\"network_subtype\\\":\\\"4g\\\",\\\"rtt_ms\\\":50},\\\"sitedata_info\\\":{\\\"client_push_phase\\\":\\\"C3\\\",\\\"client_revision\\\":1044210064,\\\"server_revision\\\":1044214717},\\\"locale_info\\\":{\\\"locale\\\":\\\"en_GB\\\",\\\"isRTL\\\":0}},\\\"marker_type\\\":2,\\\"flags\\\":1,\\\"annotations\\\":{\\\"entrypoint\\\":\\\"login_web\\\",\\\"reason\\\":\\\"FLOW_STARTED\\\",\\\"rpId\\\":\\\"accounts.meta.com\\\",\\\"uri\\\":\\\"https://web.facebook.com/?_rdc=1&_rdr\\\"},\\\"tracked_for_loss\\\":true,\\\"config_type\\\":\\\"prod\\\"}\",\"tags\":[1,128],\"sessionId\":\"crjesb:mqpb96:ra3ifp\",\"deviceId\":\"fd.ARs-dDujM9CTOOAIAR_QHK1_vcHnThvpVSFyUC-kJH8Kw-F19blPCtLmQVhkKZeMWlmPLmgEfhzq7Uqu2C-k2PXO\",\"appVersion\":\"1044.214.717.0 (1044214717)\"},{\"name\":\"web_time_spent_navigation\",\"policy\":{\"r\":1},\"time\":1785471901215.2998,\"extra\":\"{\\\"cause\\\":\\\"unload\\\",\\\"custom_data_json\\\":\\\"{\\\\\\\"source_pa\\\\\\\":\\\\\\\"{}\\\\\\\",\\\\\\\"source_pav2\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"source_uri\\\\\\\":\\\\\\\"https://web.facebook.com/?_rdc=1&_rdr\\\\\\\",\\\\\\\"source_visitation_id\\\\\\\":\\\\\\\"XCometCAAFBLoginHomepageController:ra3ifp:1:1785471888.958\\\\\\\"}\\\",\\\"sid_raw\\\":\\\"crjesb:mqpb96:ra3ifp\\\",\\\"source_path\\\":\\\"XCometCAAFBLoginHomepageController\\\"}\",\"tags\":[1,128],\"sessionId\":\"crjesb:mqpb96:ra3ifp\",\"deviceId\":\"fd.ARs-dDujM9CTOOAIAR_QHK1_vcHnThvpVSFyUC-kJH8Kw-F19blPCtLmQVhkKZeMWlmPLmgEfhzq7Uqu2C-k2PXO\",\"appVersion\":\"1044.214.717.0 (1044214717)\"}],\"ts\":1785471898452.7}"
+        },
+        {
+          "name": "Session",
+          "value": "crjesb:1785471934771"
+        },
+        {
+          "name": "mutex_falco_queue_critical^$61592505098884^#61592505098884^#^#hmac_ttl.1785471900.AR1Db6dduAQA1zrNniq3nQGr0PHH46H5zQnGMUgcczz03pcu^$",
+          "value": "33nyln:1785471900947"
+        },
+        {
+          "name": "mutex_falco_queue_immediately^$^$",
+          "value": "33nyln:1785471900947"
+        },
+        {
+          "name": "banzai:last_storage_flush",
+          "value": "1785471890088.5"
+        },
+        {
+          "name": "mutex_falco_queue_log^$61592505098884^#61592505098884^#^#hmac_ttl.1785471900.AR1Db6dduAQA1zrNniq3nQGr0PHH46H5zQnGMUgcczz03pcu^$",
+          "value": "33nyln:1785471900947"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "name": "Jatmiko Budianto"
+  }
+}
