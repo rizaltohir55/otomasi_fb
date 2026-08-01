@@ -36,6 +36,10 @@ def _ensure_display() -> bool:
     """
     global _xvfb_process
 
+    # Di Windows, browser GUI selalu dapat dibuka langsung tanpa X server / Xvfb
+    if os.name == "nt" or sys.platform == "win32":
+        return True
+
     # Sudah ada DISPLAY — asumsikan X server berjalan
     if os.environ.get("DISPLAY"):
         return True
