@@ -198,6 +198,18 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
             await page.wait_for_timeout(2000)
             trigger = await _find_trigger(page)
 
+        # Strategi 4: scroll halaman ke atas + tunggu 3 detik (FB lazy-load)
+        if not trigger:
+            log(f"   🔄 Scroll + tunggu (lazy-load)...", tag)
+            try:
+                await page.evaluate("window.scrollTo(0, 0)")
+                await page.wait_for_timeout(1000)
+                await page.evaluate("window.scrollTo(0, 300)")
+                await page.wait_for_timeout(2000)
+                trigger = await _find_trigger(page)
+            except Exception:
+                pass
+
         if trigger:
             try:
                 await trigger.click(timeout=3000)
