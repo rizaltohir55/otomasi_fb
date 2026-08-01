@@ -85,6 +85,10 @@ async def worker_loop(
     account_name = profile.get("account_name", os.path.basename(session_file))
     spoof_info = f"{profile.get('renderer')} | {profile.get('viewport', {}).get('width')}x{profile.get('viewport', {}).get('height')}"
 
+    # Inisialisasi c_user_id SEJAK AWAL supaya bisa dipakai di semua blok (termasuk finally)
+    info = get_session_info(session_file)
+    c_user_id = info.get("c_user", "")
+
     log(f"🚀 Worker [{worker_tag}] dimulai | File Sesi: {os.path.basename(session_file)}")
     log(
         f"🛡️ Hardware Spoof: GPU [{profile.get('renderer')}] | "
@@ -231,8 +235,7 @@ async def worker_loop(
     notify_status("INITIALIZING", step_msg="Menyiapkan browser context...")
 
     # Cek cooldown pembatasan — kalau akun masih cooldown, langsung fail tanpa buka browser
-    info = get_session_info(session_file)
-    c_user_id = info.get("c_user", "")
+    # c_user_id sudah di-assign di atas (sebelum try/except)
     if c_user_id and restriction_cooldown.is_in_cooldown(c_user_id):
         remaining = restriction_cooldown.remaining_sec(c_user_id)
         log(f"🛡️ Akun [{worker_tag}] masih dalam cooldown RESTRICTED ({remaining:.0f}s tersisa). Skip.", worker_tag)

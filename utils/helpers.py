@@ -8,7 +8,6 @@ import sys
 import time
 import subprocess
 import asyncio
-import fcntl
 from datetime import datetime
 from typing import Tuple, Set, Optional
 
