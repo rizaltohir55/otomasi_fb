@@ -63,13 +63,24 @@ async def check_membership(page, group_url, tag=""):
             except Exception:
                 continue
 
-    # PENDING
+    # PENDING — exact match (seperti JOINED)
     for s in scopes:
         for txt in config.PENDING_TEXTS:
             try:
-                loc = s.locator(f'div[role="button"][aria-label="{txt}"], div[role="button"]:has-text("{txt}")')
-                if await loc.count() > 0 and await loc.first.is_visible(timeout=300):
+                loc_aria = s.locator(f'div[role="button"][aria-label="{txt}"]')
+                if await loc_aria.count() > 0 and await loc_aria.first.is_visible(timeout=300):
                     return "PENDING"
+                loc_text = s.locator(f'div[role="button"]:has-text("{txt}")')
+                cnt = await loc_text.count()
+                for i in range(min(cnt, 5)):
+                    el = loc_text.nth(i)
+                    try:
+                        inner = (await el.inner_text(timeout=300)).strip().lower()
+                        if inner == txt.lower():  # EXACT match
+                            if await el.is_visible(timeout=300):
+                                return "PENDING"
+                    except Exception:
+                        continue
             except Exception:
                 continue
 
