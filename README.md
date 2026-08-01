@@ -70,7 +70,53 @@ otomasiFB/
 python autopost.py
 ```
 
-### 3. Jalankan Mode CLI (Otomatis)
+### 3. Login Akun Baru via Terminal (Lokal)
+
+Jika server otomasi berjalan di server **remote/headless** (tanpa display),
+Anda tidak bisa login akun baru via web dashboard (browser GUI tidak bisa
+ditampilkan). Gunakan script `login_terminal.py` di **komputer lokal** Anda:
+
+```bash
+# Clone repo ke komputer lokal
+git clone https://github.com/rizaltohir55/otomasi_fb.git
+cd otomasi_fb
+
+# Install dependencies
+pip install -r requirements.txt
+playwright install chromium
+
+# Jalankan script login (menu interaktif)
+python login_terminal.py
+
+# Atau langsung login akun baru tanpa menu
+python login_terminal.py --new
+
+# Atau relogin akun existing
+python login_terminal.py --relogin session/fb_session_kayy_andromeda.json
+```
+
+Script akan:
+1. Membuka browser Chromium GUI di komputer Anda
+2. Navigasi ke facebook.com
+3. Menunggu Anda login manual (max 4 menit)
+4. Otomatis menyimpan cookie sesi ke `session/fb_session_*.json`
+
+Setelah login berhasil, **copy file sesi JSON ke server otomasi**:
+```bash
+# Via scp
+scp session/fb_session_*.json user@server:/path/to/otomasi_fb/session/
+
+# Atau via git
+git add session/fb_session_*.json
+git commit -m "Add new session"
+git push origin main
+```
+
+> ℹ️ **Alternatif tanpa script**: Buka Facebook di browser Chrome/Firefox,
+> login, install extension [EditThisCookie](https://chrome.google.com/webstore/detail/editthiscookie/eemnbcpgkiklojnimhbbekjmbfkdkkoc),
+> export cookie sebagai JSON, lalu klik tombol **"Import Sesi"** di web dashboard.
+
+### 4. Jalankan Mode CLI (Otomatis)
 - **Jalankan Akun Spesifik (Mode 3: Auto Post + Auto Join)**:
   ```powershell
   python autopost.py --session session/fb_session_raden_mas.json --mode 3

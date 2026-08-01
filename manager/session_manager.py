@@ -4,6 +4,7 @@ Pengelola Sesi Akun Multi-Account Facebook.
 Mendukung penemuan file sesi, validasi c_user, dan login interaktif akun baru.
 """
 import os
+import sys
 import glob
 import json
 import time
@@ -141,23 +142,18 @@ async def interactive_login_new_account(account_tag: Optional[str] = None) -> st
     Buka Chromium GUI interaktif agar pengguna dapat login ke akun Facebook baru secara manual,
     lalu secara otomatis menyimpan cookie sesi ke file JSON.
 
-    PENTING: Fitur ini HANYA bisa dipakai jika server punya display yang BISA DILIHAT user:
-    - Desktop lokal (DISPLAY sudah set) → browser GUI terbuka di monitor user
-    - Server remote dengan VNC/RDP → user bisa lihat virtual display via VNC client
-    - Server remote TANPA VNC → user TIDAK BISA lihat browser → gunakan Import Sesi JSON
-
-    Deteksi: jika DISPLAY kosong DAN Xvfb start OK, browser terbuka di virtual display :99
-    TAPI user remote tidak bisa interact kecuali ada VNC. Return error jelas + arahkan
-    ke Import Sesi JSON.
+    Mendukung:
+    - Windows: selalu bisa launch GUI (native display, tidak perlu DISPLAY env var)
+    - Linux/Mac desktop: DISPLAY sudah set → browser GUI terbuka di monitor
+    - Linux server headless: DISPLAY kosong → return error + arahkan ke Import Sesi JSON
     """
     log("\n🔑 [LOGIN INTERAKTIF AKUN BARU]")
 
-    # Cek environment: apakah user bisa melihat browser GUI?
-    # Jika DISPLAY kosong → server headless/remote → user TIDAK BISA interact
-    # dengan browser GUI. Langsung arahkan ke Import Sesi JSON (jangan buka browser).
-    if not os.environ.get("DISPLAY"):
+    # Cek environment: Windows selalu bisa launch GUI.
+    # Linux/Mac perlu DISPLAY env var (desktop lokal sudah set, server headless tidak).
+    if sys.platform != "win32" and not os.environ.get("DISPLAY"):
         log("   ❌ Tidak dapat membuka browser GUI di environment ini.")
-        log("   ℹ️ Server ini berjalan tanpa display (headless/remote).")
+        log("   ℹ️ Server ini berjalan tanpa display (headless/remote Linux).")
         log("   ℹ️ Browser GUI tidak bisa ditampilkan ke Anda.")
         log("")
         log("   📋 CARA ALTERNATIF: Import Sesi JSON")
@@ -169,8 +165,9 @@ async def interactive_login_new_account(account_tag: Optional[str] = None) -> st
         log("   6. Paste JSON cookie ke form Import + isi nama akun")
         log("   7. Klik 'Import Sesi' — akun baru akan tersimpan")
         log("")
-        log("   ℹ️ Jika Anda punya akses VNC/RDP ke server, set DISPLAY env var")
-        log("      sebelum menjalankan server untuk mengaktifkan browser GUI.")
+        log("   ℹ️ Atau jalankan script login_terminal.py di komputer LOKAL Anda:")
+        log("      python3 login_terminal.py")
+        log("      (clone repo ke komputer lokal, install dependencies, lalu jalankan)")
         return ""
 
     if not account_tag:
@@ -256,11 +253,11 @@ async def relogin_existing_account(session_file: str) -> bool:
     log(f"\n🔄 [LOGIN ULANG / REFRESH SESI: {curr_name}]")
     log(f"   Target file: {session_file}")
 
-    # Cek environment: jika DISPLAY kosong → server headless/remote
-    # User TIDAK BISA interact dengan browser GUI. Langsung arahkan ke Import Sesi JSON.
-    if not os.environ.get("DISPLAY"):
+    # Cek environment: Windows selalu bisa launch GUI.
+    # Linux/Mac perlu DISPLAY env var (desktop lokal sudah set, server headless tidak).
+    if sys.platform != "win32" and not os.environ.get("DISPLAY"):
         log("   ❌ Tidak dapat membuka browser GUI di environment ini.")
-        log("   ℹ️ Server ini berjalan tanpa display (headless/remote).")
+        log("   ℹ️ Server ini berjalan tanpa display (headless/remote Linux).")
         log("   ℹ️ Browser GUI tidak bisa ditampilkan ke Anda.")
         log("")
         log("   📋 CARA ALTERNATIF: Import Sesi JSON (Refresh Cookie)")
@@ -274,8 +271,8 @@ async def relogin_existing_account(session_file: str) -> bool:
         log("   8. Klik 'Import Sesi' — sesi baru akan tersimpan")
         log(f"   9. Hapus sesi lama ({os.path.basename(session_file)}) manual jika perlu")
         log("")
-        log("   ℹ️ Jika Anda punya akses VNC/RDP ke server, set DISPLAY env var")
-        log("      sebelum menjalankan server untuk mengaktifkan browser GUI.")
+        log("   ℹ️ Atau jalankan script login_terminal.py di komputer LOKAL Anda:")
+        log("      python3 login_terminal.py")
         return False
 
     browser = None
