@@ -86,32 +86,94 @@ async def execute_join(page, group_url, tag=""):
     url, gid = normalize_url(group_url)
     log(f"➕ Join grup: {group_url}", tag)
 
-    # Cari tombol Join
+    # Cari tombol Join — comprehensive: text + aria-label + href + structural
     join_btn = None
+
+    # Strategy A: text-based (multibahasa)
     for txt in config.JOIN_TEXTS:
+        for sel in [f'div[role="button"][aria-label="{txt}"]',
+                    f'div[role="button"]:has-text("{txt}")',
+                    f'button:has-text("{txt}")',
+                    f'a[role="button"]:has-text("{txt}")']:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                    join_btn = loc
+                    break
+            except Exception:
+                continue
+        if join_btn:
+            break
+
+    # Strategy B: href-based (link join)
+    if not join_btn:
         try:
-            loc = page.locator(f'div[role="button"][aria-label="{txt}"], div[role="button"]:has-text("{txt}")')
-            if await loc.count() > 0 and await loc.first.is_visible(timeout=300):
-                join_btn = loc.first
-                break
+            loc = page.locator('a[href*="/groups/join/"]').first
+            if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                join_btn = loc
         except Exception:
-            continue
+            pass
+
+    # Strategy C: scroll ke atas lalu cari lagi (FB hide tombol saat scroll)
+    if not join_btn:
+        try:
+            await page.evaluate("window.scrollTo(0, 0)")
+            await page.wait_for_timeout(1000)
+            for txt in config.JOIN_TEXTS:
+                loc = page.locator(f'div[role="button"]:has-text("{txt}")').first
+                if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                    join_btn = loc
+                    break
+        except Exception:
+            pass
+
+    # Strategy D: reload + cari lagi
+    if not join_btn:
+        log(f"   🔄 Reload (cari tombol Join)...", tag)
+        await page.reload(wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(2000)
+        for txt in config.JOIN_TEXTS:
+            for sel in [f'div[role="button"][aria-label="{txt}"]',
+                        f'div[role="button"]:has-text("{txt}")',
+                        f'button:has-text("{txt}")']:
+                try:
+                    loc = page.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                        join_btn = loc
+                        break
+                except Exception:
+                    continue
+            if join_btn:
+                break
 
     if not join_btn:
         log(f"   ❌ Tombol Join tidak ditemukan", tag)
         return False
 
-    try:
-        await join_btn.scroll_into_view_if_needed()
-        await join_btn.click(timeout=3000)
-        await page.wait_for_timeout(1000)
-    except Exception:
+    # Klik tombol Join — retry 2x
+    clicked = False
+    for attempt in range(2):
         try:
-            await join_btn.click(force=True, timeout=3000)
-            await page.wait_for_timeout(1000)
-        except Exception as e:
-            log(f"   ❌ Gagal klik Join: {e}", tag)
-            return False
+            await join_btn.scroll_into_view_if_needed(timeout=2000)
+            await page.wait_for_timeout(300)
+            await join_btn.click(timeout=3000)
+            await page.wait_for_timeout(1500)
+            clicked = True
+            break
+        except Exception:
+            try:
+                await join_btn.click(force=True, timeout=3000)
+                await page.wait_for_timeout(1500)
+                clicked = True
+                break
+            except Exception as e:
+                if attempt == 0:
+                    log(f"   ⚠️ Retry klik Join...", tag)
+                else:
+                    log(f"   ❌ Gagal klik Join: {e}", tag)
+
+    if not clicked:
+        return False
 
     # Handle modal konfirmasi / Q&A
     await _handle_join_modal(page, tag)

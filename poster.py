@@ -10,20 +10,50 @@ from browser import check_restriction, goto
 
 
 async def _find_trigger(page):
-    """Cari tombol trigger komposer ('Tulis sesuatu...', 'Write something...')."""
+    """Cari tombol trigger komposer — comprehensive multi-strategy."""
     scope = page.locator('div[role="main"]').first
     scopes = [scope, page] if await scope.count() > 0 else [page]
+
     for s in scopes:
+        # Strategy A: text-based (multibahasa)
         for txt in config.TRIGGER_TEXTS:
             for sel in [f'div[role="button"][aria-label="{txt}"]',
                         f'div[role="button"]:has-text("{txt}")',
-                        f'span:has-text("{txt}")']:
+                        f'span:has-text("{txt}")',
+                        f'div[aria-label="{txt}"]',
+                        f'a[role="button"][aria-label="{txt}"]']:
                 try:
                     loc = s.locator(sel).first
                     if await loc.count() > 0 and await loc.is_visible(timeout=300):
                         return loc
                 except Exception:
                     continue
+
+    # Strategy B: structural (language-independent)
+    for s in scopes:
+        for sel in ['div[role="button"][aria-haspopup="dialog"]',
+                    'div[role="region"] div[role="button"][aria-haspopup="dialog"]',
+                    'div[role="main"] div[aria-placeholder]',
+                    'div[role="main"] span[aria-placeholder]',
+                    'div[contenteditable="true"][aria-placeholder]']:
+            try:
+                loc = s.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                    return loc
+            except Exception:
+                continue
+
+    # Strategy C: full page scan (fallback)
+    for txt in config.TRIGGER_TEXTS:
+        for sel in [f'div[role="button"]:has-text("{txt}")',
+                    f'span:has-text("{txt}")']:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=300):
+                    return loc
+            except Exception:
+                continue
+
     return None
 
 
@@ -138,13 +168,10 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
     if is_res:
         return False, f"restricted: {res_reason}"
 
-    # Navigasi ke grup
-    curr = page.url.lower()
-    need_nav = True
-    if "/groups/" in curr and gid and gid.lower() in curr:
-        need_nav = False
-    if need_nav:
-        await goto(page, group_url)
+    # Navigasi ke grup — SELALU navigasi ulang untuk pastikan halaman fresh
+    # (setelah join, FB sering redirect ke halaman lain)
+    await goto(page, group_url)
+    await page.wait_for_timeout(1000)
 
     # Cek apakah komposer sudah aktif (mungkin dari grup sebelumnya)
     if await _dialog_active(page):
