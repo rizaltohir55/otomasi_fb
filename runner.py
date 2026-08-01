@@ -379,6 +379,19 @@ async def _auto_loop_single(sfile, groups, mode, tag, headless, randomize):
             log(f"🛑 Max loops ({config.SESSION_MAX_LOOPS}) tercapai. Stop.", tag)
             break
 
+        # Reset cooldown di awal setiap session (kecuali session #1)
+        # Cooldown di-set saat session sebelumnya kena rate-limit,
+        # tapi setelah session break (5-15 menit), cooldown seharusnya sudah selesai.
+        if loop_count > 1:
+            c_user_check = get_c_user(sfile)
+            if c_user_check and cooldown_active(c_user_check):
+                remaining_cd = _cooldowns.get(c_user_check, 0) - time.time()
+                if remaining_cd > 0:
+                    log(f"⏳ Cooldown masih aktif ({remaining_cd:.0f}s tersisa). Tunggu selesai...", tag)
+                    await asyncio.sleep(max(0, remaining_cd))
+                _cooldowns.pop(c_user_check, None)
+                log(f"✅ Cooldown direset. Mulai session baru.", tag)
+
         # Jalankan worker_loop
         result = await worker_loop(sfile, groups, mode, tag, headless, randomize)
 
@@ -388,10 +401,22 @@ async def _auto_loop_single(sfile, groups, mode, tag, headless, randomize):
         total_ok += ok
         total_fail += fail
 
-        # Jika error fatal / expired / locked → stop
-        if status in ["EXPIRED", "FATAL", "ERROR", "LOCKED", "COOLDOWN"]:
+        # Jika error fatal / expired → stop (tidak bisa lanjut)
+        if status in ["EXPIRED", "FATAL", "ERROR", "LOCKED"]:
             log(f"🛑 Stop auto-loop: {status}", tag)
             break
+
+        # Jika COOLDOWN → jangan stop! Tunggu cooldown selesai lalu lanjut
+        if status == "COOLDOWN":
+            c_user_check = get_c_user(sfile)
+            if c_user_check:
+                cd_remaining = _cooldowns.get(c_user_check, 0) - time.time()
+                if cd_remaining > 0:
+                    log(f"⏳ Cooldown {cd_remaining:.0f}s. Tunggu sebelum session break...", tag)
+                    await asyncio.sleep(cd_remaining)
+                _cooldowns.pop(c_user_check, None)
+            # Lanjut ke session break (bukan stop)
+            log(f"✅ Cooldown selesai. Lanjut ke session break.", tag)
 
         # Jika semua grup sudah diproses → stop
         if status == "DONE":
