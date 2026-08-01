@@ -212,7 +212,33 @@ async def worker_loop(
     try:
         async with async_playwright() as p:
             try:
-                browser, context = await create_stealth_context(p, session_file=session_file, headless=headless)
+                # Sub-step progress supaya UI tidak terlihat stuck saat browser launch
+                notify_status("INITIALIZING", step_msg="Meluncurkan browser Chromium...")
+                log(f"   🌐 Meluncurkan browser Chromium (headless={headless})...", worker_tag)
+
+                # Timeout wrapper: kalau create_stealth_context > 90 detik, abort
+                # (normal: 5-15 detik; lambat: 30-60 detik; stuck: >90 detik)
+                try:
+                    browser, context = await asyncio.wait_for(
+                        create_stealth_context(p, session_file=session_file, headless=headless),
+                        timeout=90.0
+                    )
+                except asyncio.TimeoutError:
+                    log(f"❌ Browser launch timeout (>90s) untuk [{worker_tag}].", worker_tag)
+                    notify_status("FAILED", step_msg="Browser launch timeout (>90s). Coba restart server.")
+                    return {
+                        "session_file": session_file,
+                        "worker_tag": worker_tag,
+                        "account_name": account_name,
+                        "status": "ERROR_INIT",
+                        "success_count": 0,
+                        "fail_count": len(worker_groups),
+                        "total_groups": len(worker_groups),
+                        "duration_sec": round(time.time() - start_time, 1),
+                        "spoof_info": spoof_info
+                    }
+
+                notify_status("INITIALIZING", step_msg="Membuka halaman browser...")
                 page = await context.new_page()
             except Exception as e:
                 log(f"❌ Gagal menginisialisasi browser context untuk [{worker_tag}]: {e}", worker_tag)
