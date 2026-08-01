@@ -159,7 +159,7 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
         except Exception:
             pass
 
-    if not _dialog_active(page):
+    if not await _dialog_active(page):
         # Cari trigger
         trigger = await _find_trigger(page)
         if not trigger:
