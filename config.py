@@ -86,8 +86,8 @@ JOINED_TEXTS = [
     "Anda anggota", "You're a member", "Member", "Anggota",
 ]
 PENDING_TEXTS = [
-    "Request sent", "Permintaan terkirim", "Cancel request",
-    "Batalkan permintaan", "Menunggu persetujuan",
+    "Request sent", "Permintaan terkirim",
+    "Cancel request", "Batalkan permintaan",
 ]
 PHOTO_TEXTS = ["Photo/video", "Foto/video", "Add to your post", "Tambahkan ke"]
 FAIL_TEXTS = [

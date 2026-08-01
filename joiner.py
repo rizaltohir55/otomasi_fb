@@ -13,16 +13,23 @@ async def check_membership(page, group_url, tag=""):
     """Return: JOINED, PENDING, NOT_JOINED, RESTRICTED, NOT_LOGGED_IN, UNKNOWN."""
     url, gid = normalize_url(group_url)
 
-    # Navigasi ke grup jika belum
-    curr = page.url.lower()
-    need_nav = True
-    if "/groups/" in curr and gid and gid.lower() in curr:
-        need_nav = False
-    elif re.search(r"/groups/\d+", curr):
-        need_nav = False
-    if need_nav:
-        await goto(page, url, timeout_ms=20000)
-        await page.wait_for_timeout(500)
+    # SELALU navigasi ulang ke grup target — jangan skip walau URL sama.
+    # Teks dari grup sebelumnya (post pending, modal, notifikasi) bisa
+    # menyebabkan false positive jika tidak navigasi ulang.
+    await goto(page, url, timeout_ms=20000)
+    await page.wait_for_timeout(1000)
+
+    # Tutup overlay/modal yang mungkin masih terbuka dari grup sebelumnya
+    try:
+        for sel in ['div[role="dialog"] div[role="button"][aria-label="Tutup"]',
+                    'div[role="dialog"] div[role="button"][aria-label="Close"]']:
+            btn = page.locator(sel).first
+            if await btn.count() > 0 and await btn.is_visible(timeout=300):
+                await btn.click(timeout=1000)
+                await page.wait_for_timeout(300)
+                break
+    except Exception:
+        pass
 
     # Cek restriction
     is_res, reason = await check_restriction(page)
