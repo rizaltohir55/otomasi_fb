@@ -543,26 +543,25 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
                     except Exception:
                         pass
 
-                    # ── FASE 3: Cek kemampuan posting (NON-DESTRUKTIF) ──
-                    # Rate-limit FB hanya terlihat SETELAH klik tombol Post/Posting.
-                    # Dry-run submit (ketik + klik Post) TIDAK AMAN karena:
-                    # 1. Memperburuk rate-limit (setiap check = 1 hit rate-limit)
-                    # 2. Bisa salah deteksi (composer tertutup bukan karena sukses)
-                    # 3. Post "test" bisa terbit ke grup user tanpa izin
+                    # ── FASE 3: Dry-run submit test (DESTRUKTIF — demi akurasi) ──
+                    # User memilih akurasi > keamanan: test submit aktual dilakukan
+                    # untuk verifikasi rate-limit secara pasti. Post "test" akan
+                    # terbit di grup jika akun bisa posting.
                     #
-                    # Strategi NON-DESTRUKTIF:
+                    # Strategi akurat:
                     # 1. Cek tombol Post disabled (aria-disabled=true) → RESTRICTED
-                    # 2. Cek body/composer untuk pesan rate-limit yang sudah ada
-                    #    dari sesi sebelumnya
-                    # 3. Jika tombol enabled & tidak ada error → return ACTIVE dengan
-                    #    DISCLAIMER JUJUR: rate-limit tidak dapat dicek tanpa submit
-                    #
-                    # User disarankan: jalankan otomasi dengan batch kecil (5-10 grup)
-                    # untuk uji coba aktual. Jika gagal rate-limit, akun akan otomatis
-                    # masuk cooldown 30 menit.
+                    # 2. Ketik caption test unik (dengan timestamp) + klik Post
+                    # 3. Polling 5 detik:
+                    #    a. Jika muncul inline failure (rate-limit) → RESTRICTED ✅
+                    #    b. Jika composer tertutup → cek feed grup untuk verifikasi
+                    #       post benar-benar terbit (reload + cari caption test)
+                    #       - Post ditemukan → ACTIVE ✅ (akurat, post berhasil)
+                    #       - Post tidak ditemukan → UNKNOWN (composer tertutup
+                    #         tapi post tidak ada — kasus langka, mungkin di-moderasi)
+                    #    c. Jika composer masih terbuka tanpa error → UNKNOWN
 
-                    from engine.dom_analyzer import get_active_composer_dialog, find_submit_button
-                    from engine.composer import close_composer_dialog
+                    from engine.dom_analyzer import get_active_composer_dialog, find_submit_button, find_caption_textbox
+                    from engine.composer import detect_composer_post_failure, close_composer_dialog
 
                     dialog = await get_active_composer_dialog(page)
                     if dialog:
@@ -591,16 +590,98 @@ def _run_playwright_posting_check(sessions: list, test_group_url: str) -> list:
                         except Exception:
                             pass
 
-                        # Cleanup composer
-                        await close_composer_dialog(page, worker_tag=f"Check-{sname}")
+                        # ── Dry-run submit test ──
+                        # Caption test unik dengan timestamp supaya bisa dicari di feed
+                        # tanpa false-positive (post lama tidak akan match).
+                        import time as _time
+                        test_caption = f"check_posting_test_{int(_time.time())}"
+                        tb = await find_caption_textbox(page)
+                        if tb and submit_btn:
+                            try:
+                                await tb.click(timeout=1000)
+                                await page.wait_for_timeout(200)
+                                await tb.press_sequentially(test_caption, delay=10)
+                                await page.wait_for_timeout(500)
 
-                    # Tombol Post enabled & tidak ada error visible → akun LOGIN valid
-                    # & composer tersedia. TAPI rate-limit tidak dapat dicek tanpa
-                    # submit aktual. Return ACTIVE dengan disclaimer jujur.
-                    log(f"   ✅ [{sname}] Login valid & composer tersedia (rate-limit tidak dapat dicek non-destruktif).")
+                                # Klik tombol Post
+                                log(f"   🧪 [{sname}] Dry-run submit test (caption='{test_caption}')...")
+                                try:
+                                    await submit_btn.click(timeout=3000)
+                                except Exception:
+                                    await submit_btn.click(force=True, timeout=3000)
+
+                                # Polling 5 detik untuk cek hasil
+                                composer_closed = False
+                                for _ in range(5):
+                                    await page.wait_for_timeout(1000)
+                                    # Cek jika composer tertutup
+                                    if not await get_active_composer_dialog(page):
+                                        composer_closed = True
+                                        break
+                                    # Cek inline failure (rate-limit)
+                                    is_fail, fail_reason = await detect_composer_post_failure(page, worker_tag=f"Check-{sname}")
+                                    if is_fail:
+                                        log(f"   ⛔ [{sname}] DIBATASI saat dry-run: {fail_reason}")
+                                        await close_composer_dialog(page, worker_tag=f"Check-{sname}")
+                                        return {"path": spath, "name": sname, "c_user": cuser,
+                                                "status": "RESTRICTED", "message": f"Dibatasi FB (dry-run): {fail_reason}"}
+
+                                if composer_closed:
+                                    # Composer tertutup — verifikasi post benar-benar terbit
+                                    # via reload feed grup + cari caption test.
+                                    log(f"   🔍 [{sname}] Composer tertutup. Verifikasi post terbit di feed...")
+                                    await page.wait_for_timeout(2000)  # tunggu FB proses
+                                    try:
+                                        await page.reload(wait_until="domcontentloaded", timeout=15000)
+                                        await page.wait_for_timeout(3000)
+                                        body_after = (await page.locator("body").inner_text(timeout=2000)).lower()
+                                        if test_caption.lower() in body_after:
+                                            log(f"   ✅ [{sname}] Post test DITEMUKAN di feed — akun DAPAT memposting.")
+                                            return {"path": spath, "name": sname, "c_user": cuser,
+                                                    "status": "ACTIVE",
+                                                    "message": "Akun aktif & dapat memposting (post test terverifikasi terbit)"}
+                                        else:
+                                            # Composer tertutup tapi post tidak ditemukan di feed.
+                                            # Mungkin post di-tahan moderasi admin grup, atau gagal silent.
+                                            log(f"   ⚠️ [{sname}] Composer tertutup tapi post tidak ditemukan di feed.")
+                                            # Cek apakah ada pesan rate-limit di body
+                                            for kw in config.RESTRICTION_TEXTS:
+                                                if kw in body_after:
+                                                    log(f"   ⛔ [{sname}] Rate-limit terdeteksi: '{kw}'")
+                                                    return {"path": spath, "name": sname, "c_user": cuser,
+                                                            "status": "RESTRICTED", "message": f"Dibatasi FB: '{kw}'"}
+                                            return {"path": spath, "name": sname, "c_user": cuser,
+                                                    "status": "UNKNOWN",
+                                                    "message": "Composer tertutup tapi post tidak terverifikasi (mungkin di-moderasi admin)"}
+                                    except Exception as reload_e:
+                                        log(f"   ⚠️ [{sname}] Reload feed gagal: {reload_e}")
+                                        return {"path": spath, "name": sname, "c_user": cuser,
+                                                "status": "ACTIVE",
+                                                "message": "Akun aktif (post terkirim, verifikasi feed gagal)"}
+                                else:
+                                    # Composer masih terbuka tanpa error jelas
+                                    await close_composer_dialog(page, worker_tag=f"Check-{sname}")
+                                    log(f"   ⚠️ [{sname}] Dry-run tidak conclucsive — composer masih terbuka.")
+                                    return {"path": spath, "name": sname, "c_user": cuser,
+                                            "status": "UNKNOWN",
+                                            "message": "Tidak dapat memverifikasi (composer tidak respons setelah submit test)"}
+                            except Exception as e:
+                                log(f"   ⚠️ [{sname}] Dry-run submit error: {e}")
+                                await close_composer_dialog(page, worker_tag=f"Check-{sname}")
+                                return {"path": spath, "name": sname, "c_user": cuser,
+                                        "status": "UNKNOWN",
+                                        "message": f"Error dry-run submit: {e}"}
+
+                    # Cleanup composer sebelum return ACTIVE (fallback jika tidak ada dialog)
+                    try:
+                        await close_composer_dialog(page, worker_tag=f"Check-{sname}")
+                    except Exception:
+                        pass
+
+                    log(f"   ⚠️ [{sname}] Composer tidak tersedia — tidak dapat test posting.")
                     return {"path": spath, "name": sname, "c_user": cuser,
-                            "status": "ACTIVE",
-                            "message": "Login valid & composer tersedia. Rate-limit tidak dapat dicek tanpa submit — jalankan batch kecil untuk uji coba."}
+                            "status": "UNKNOWN",
+                            "message": "Composer tidak tersedia di grup test (akun mungkin bukan anggota)"}
 
                 except Exception as e:
                     err_msg = str(e) or type(e).__name__
