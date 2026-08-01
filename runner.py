@@ -191,8 +191,24 @@ async def worker_loop(session_file, groups, mode, tag="Worker", headless=True, r
                 return {"status": "EXPIRED", "ok": 0, "fail": len(deduped)}
 
             log(f"✅ Login OK. Proses {len(deduped)} grup...", tag)
+            log(f"📊 Max post per session: {config.MAX_POST_PER_SESSION}", tag)
+
+            # Rotasi caption: pisahkan caption.txt per baris === sebagai variasi
+            caption_variations = []
+            if caption:
+                parts = caption.split("===")
+                caption_variations = [p.strip() for p in parts if p.strip()]
+            if not caption_variations:
+                caption_variations = [caption]
+            log(f"📝 {len(caption_variations)} variasi caption siap", tag)
 
             for idx, gurl in enumerate(deduped, 1):
+                # Cek max post limit — stop SEBELUM kena limit FB
+                if ok_count >= config.MAX_POST_PER_SESSION:
+                    log(f"\n🛑 Max post tercapai ({ok_count}/{config.MAX_POST_PER_SESSION}). Stop untuk hindari rate-limit.", tag)
+                    log(f"💡 Jalankan lagi nanti (1-2 jam) untuk lanjut.", tag)
+                    break
+
                 log(f"\n[{tag}] [{idx}/{len(deduped)}] {gurl}")
 
                 try:
@@ -237,8 +253,9 @@ async def worker_loop(session_file, groups, mode, tag="Worker", headless=True, r
                             fail_count += 1
                             continue
 
-                        # POST
-                        success, reason = await post_to_group(page, gurl, caption, media, tag)
+                        # POST — pakai caption rotasi (variasi teks)
+                        caption_now = random.choice(caption_variations) if caption_variations else caption
+                        success, reason = await post_to_group(page, gurl, caption_now, media, tag)
                         if success:
                             ok_count += 1
                             progress_mark(prog_file, gurl)
@@ -271,11 +288,26 @@ async def worker_loop(session_file, groups, mode, tag="Worker", headless=True, r
                     log(f"❌ Error: {e}", tag)
                     fail_count += 1
 
-                # Jeda
-                if idx < len(deduped):
+                # Jeda antar grup — natural, 5-12 detik
+                if idx < len(deduped) and ok_count < config.MAX_POST_PER_SESSION:
                     delay = random.uniform(config.DELAY_MIN, config.DELAY_MAX)
                     log(f"⏳ Jeda {delay:.1f}s...", tag)
                     await asyncio.sleep(delay)
+
+                    # Break panjang setiap N grup sukses (simulasi istirahat manusia)
+                    if ok_count > 0 and ok_count % config.BREAK_EVERY_N == 0:
+                        break_sec = random.uniform(config.BREAK_MIN_SEC, config.BREAK_MAX_SEC)
+                        log(f"☕ Break {break_sec:.0f}s ({break_sec/60:.1f} menit) — istirahat setelah {ok_count} post...", tag)
+                        await asyncio.sleep(break_sec)
+                        log(f"✅ Break selesai. Lanjut.", tag)
+
+                    # Kadang scroll halaman acak (simulasi baca feed)
+                    if random.random() < 0.3:  # 30% chance
+                        try:
+                            await page.evaluate(f"window.scrollTo(0, {random.randint(100, 500)})")
+                            await asyncio.sleep(random.uniform(2, 5))
+                        except Exception:
+                            pass
 
             # Save session
             try:

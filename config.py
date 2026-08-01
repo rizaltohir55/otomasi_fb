@@ -14,10 +14,10 @@ for d in [SESSION_DIR, MEDIA_DIR, LOGS_DIR, DATA_DIR]:
 CAPTION_FILE = os.path.join(DIR, "caption.txt")
 GROUPS_FILE  = os.path.join(DIR, "groups.txt")
 
-# Timing (detik)
-DELAY_MIN = 1.0
-DELAY_MAX = 2.0
-TYPE_DELAY_MS = 3
+# Timing (detik) — natural, tidak terlalu cepat
+DELAY_MIN = 5.0    # was 1.0 — minimal 5 detik antar grup
+DELAY_MAX = 12.0   # was 2.0 — maksimal 12 detik antar grup
+TYPE_DELAY_MS = 15  # was 3 — ketik lebih lambat (manusia rata-rata)
 NAV_TIMEOUT = 30000
 ELEMENT_TIMEOUT = 3000
 
@@ -31,6 +31,17 @@ JITTER_MAX = 2.0
 COOLDOWN_SEC = 1800  # 30 menit
 MAX_MEDIA_MB = 4
 SKIP_FILE = os.path.join(DATA_DIR, "skip_list.txt")
+
+# Batas post per session — stop SEBELUM kena limit FB
+MAX_POST_PER_SESSION = 15  # FB mulai restriksi ~20 post, stop di 15 untuk aman
+
+# Break panjang setiap N grup (simulasi istirahat manusia)
+BREAK_EVERY_N = 8          # setiap 8 grup, ambil jeda panjang
+BREAK_MIN_SEC = 60         # jeda 60-180 detik (1-3 menit)
+BREAK_MAX_SEC = 180
+
+# Rotasi caption — variasi teks supaya tidak identik
+CAPTION_VARIATIONS = []  # diisi dari caption.txt, dipakai bergantian
 
 # Spoof profiles
 PROFILES = [

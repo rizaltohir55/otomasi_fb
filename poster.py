@@ -1,7 +1,7 @@
 """
 poster.py — Post ke grup: buka komposer, ketik caption, upload media, submit.
 """
-import os, re, asyncio, time
+import os, re, asyncio, time, random
 from typing import Tuple, Optional, List
 from playwright.async_api import Page
 import config
@@ -249,11 +249,16 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
             pass
         await page.wait_for_timeout(100)
 
-        # Ketik per baris
+        # Ketik per baris — delay acak per karakter (lebih natural)
         for i, line in enumerate(caption.splitlines()):
             line = line.strip()
             if line:
-                await tb.press_sequentially(line, delay=config.TYPE_DELAY_MS)
+                # Variasi delay per karakter: 10-30ms (manusia tidak konsisten)
+                for char in line:
+                    await tb.press_sequentially(char, delay=random.randint(10, 30))
+                    # Kadang jeda lebih lama (seperti berpikir)
+                    if random.random() < 0.05:  # 5% chance
+                        await page.wait_for_timeout(random.randint(200, 800))
             if i < caption.count("\n"):
                 await page.keyboard.press("Shift+Enter")
         await page.wait_for_timeout(300)
