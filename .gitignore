@@ -2,10 +2,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.bak
-*.corrupt.*
+logs/
+data/
 server.log
 server.pid
-logs/activity.log
-data/session_progress_*.json
-data/group_skip_list.txt
 .vscode/
