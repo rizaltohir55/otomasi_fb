@@ -148,6 +148,16 @@ async def execute_join(page, group_url, tag=""):
         log(f"   ✅ Join berhasil! Status: {status}", tag)
         return True
 
+    # Cek apakah grup private (butuh approval admin) — tombol "Minta Bergabung"
+    for txt in ["Minta Bergabung", "Minta bergabung", "Request to join", "Solicitar unirse"]:
+        try:
+            loc = page.locator(f'div[role="button"][aria-label="{txt}"], div[role="button"]:has-text("{txt}")')
+            if await loc.count() > 0 and await loc.first.is_visible(timeout=300):
+                log(f"   ⏳ Grup private — join request dikirim, menunggu admin approval.", tag)
+                return True  # anggap sukses (pending admin)
+        except Exception:
+            continue
+
     log(f"   ❌ Gagal join. Status: {status}", tag)
     return False
 

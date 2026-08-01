@@ -160,11 +160,11 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
             pass
 
     if not await _dialog_active(page):
-        # Cari trigger — coba 2x: pertama langsung, kedua setelah reload
+        # Cari trigger — coba 3 strategi berturut-turut
         trigger = await _find_trigger(page)
 
+        # Strategi 1: tab Diskusi (grup Jual-Beli)
         if not trigger:
-            # Coba tab Diskusi (grup Jual-Beli)
             try:
                 disc = page.locator('a[role="tab"]:has-text("Diskusi"), a[role="tab"]:has-text("Discussion")').first
                 if await disc.count() > 0:
@@ -174,15 +174,13 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
             except Exception:
                 pass
 
+        # Strategi 2: reload halaman
         if not trigger:
-            # Reload halaman — setelah join, FB sering belum render komposer
             log(f"   🔄 Reload halaman (komposer belum muncul)...", tag)
             await page.reload(wait_until="domcontentloaded", timeout=20000)
             await page.wait_for_timeout(2000)
             trigger = await _find_trigger(page)
-
             if not trigger:
-                # Coba tab Diskusi lagi setelah reload
                 try:
                     disc = page.locator('a[role="tab"]:has-text("Diskusi"), a[role="tab"]:has-text("Discussion")').first
                     if await disc.count() > 0:
@@ -191,6 +189,14 @@ async def post_to_group(page, group_url, caption, media_paths, tag=""):
                         trigger = await _find_trigger(page)
                 except Exception:
                     pass
+
+        # Strategi 3: navigasi langsung ke URL /discussion/
+        if not trigger and gid:
+            disc_url = f"https://www.facebook.com/groups/{gid}/discussion/"
+            log(f"   🔄 Navigasi ke {disc_url}...", tag)
+            await goto(page, disc_url, timeout_ms=20000)
+            await page.wait_for_timeout(2000)
+            trigger = await _find_trigger(page)
 
         if trigger:
             try:
