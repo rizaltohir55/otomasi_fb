@@ -254,7 +254,23 @@ def import_session_file(source_path: str, account_tag: str) -> str:
 
 async def verify_session_live_status(session_file: str) -> Dict[str, Any]:
     """
-    Uji status live sesi ke Facebook secara cepat & kilat (<1 detik).
+    Uji status live sesi ke Facebook secara akurat menggunakan Playwright headless.
+
+    Sebelumnya pakai urllib.request mentah, tapi FB menolak dengan HTTP 400
+    (deteksi bot — urllib tidak ada JS execution, header tidak lengkap,
+    fingerprint bot). Playwright dengan stealth context terbukti akurat
+    di live test.
+
+    Strategi:
+    1. Validasi file sesi (ada, JSON valid, c_user + xs ada, belum expired).
+    2. Buka Chromium headless dengan stealth context + storage_state.
+    3. Navigasi ke https://www.facebook.com/ (domcontentloaded, timeout 20s).
+    4. Cek URL: login/checkpoint/recover → EXPIRED/CHECKPOINT.
+    5. Cek cookie c_user SETELAH navigasi (FB kadang hapus via Set-Cookie
+       kalau sesi invalid di sisi server).
+    6. Cek body text untuk checkpoint indicators (2FA, "verify it's you").
+    7. Cek restriction (modal/banner/aria-live).
+    8. Return status: ACTIVE / EXPIRED / CHECKPOINT / RESTRICTED / UNKNOWN.
     """
     info = get_session_info(session_file)
     result = {
@@ -270,69 +286,158 @@ async def verify_session_live_status(session_file: str) -> Dict[str, Any]:
         result["message"] = "File sesi tidak ditemukan"
         return result
 
+    # ── 1. Validasi file sesi ──────────────────────────────────────────────
     try:
         with open(session_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-
-        cookies = data.get("cookies", [])
-        c_user = next((c.get("value") for c in cookies if c.get("name") == "c_user"), "")
-        xs = next((c.get("value") for c in cookies if c.get("name") == "xs"), "")
-
-        if not c_user or not xs:
-            result["status"] = "EXPIRED"
-            result["message"] = "Cookie c_user / xs tidak ditemukan"
-            return result
-
-        # Cek expiration timestamp jika ada
-        c_user_cookie = next((c for c in cookies if c.get("name") == "c_user"), {})
-        exp = c_user_cookie.get("expires", 0)
-        if exp > 0 and exp < time.time():
-            result["status"] = "EXPIRED"
-            result["message"] = "Cookie c_user telah kedaluwarsa"
-            return result
-
-        # Jalankan HTTP GET cepat ke m.facebook.com via threadpool agar non-blocking
-        def http_check() -> Tuple[str, str]:
-            try:
-                import urllib.request
-                import urllib.error
-                cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies if "name" in c and "value" in c])
-                req = urllib.request.Request(
-                    "https://m.facebook.com/",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-                        "Cookie": cookie_str
-                    }
-                )
-                with urllib.request.urlopen(req, timeout=6) as resp:
-                    final_url = resp.geturl().lower()
-                    body = resp.read().decode("utf-8", errors="ignore").lower()
-                    if "checkpoint" in final_url or "checkpoint" in body:
-                        return "CHECKPOINT", "Akun Terkena Checkpoint FB"
-                    elif "login" in final_url:
-                        return "EXPIRED", "Sesi Kedaluwarsa (Redirect Login)"
-                    elif any(kw in body for kw in config.RESTRICTION_TEXTS):
-                        return "RESTRICTED", "Akun Dibatasi FB (Restricted)"
-                    else:
-                        return "ACTIVE", "Sesi Aktif & Terverifikasi"
-            except urllib.error.HTTPError as he:
-                # HTTP 4xx/5xx — sesi mungkin valid tapi FB menolak request ini.
-                # Jangan false-positive ACTIVE; kembalikan UNKNOWN.
-                return "UNKNOWN", f"HTTP {he.code} — sesi tidak dapat diverifikasi"
-            except urllib.error.URLError as ue:
-                # Network error (DNS, timeout, refused) — tidak bisa memastikan status sesi.
-                return "UNKNOWN", f"Network error: {ue.reason}"
-            except Exception as e:
-                # Exception tak terduga lain — konservatif: UNKNOWN, bukan ACTIVE.
-                return "UNKNOWN", f"Error tidak terduga: {e}"
-
-        status, msg = await asyncio.to_thread(http_check)
-        result["status"] = status
-        result["message"] = msg
-
+    except json.JSONDecodeError as je:
+        result["status"] = "EXPIRED"
+        result["message"] = f"File sesi korup (JSON invalid): {je}"
+        return result
     except Exception as e:
         result["status"] = "EXPIRED"
-        result["message"] = str(e)
+        result["message"] = f"Gagal membaca file sesi: {e}"
+        return result
+
+    cookies = data.get("cookies", [])
+    c_user_val = next((c.get("value") for c in cookies if c.get("name") == "c_user"), "")
+    xs_val = next((c.get("value") for c in cookies if c.get("name") == "xs"), "")
+
+    if not c_user_val:
+        result["status"] = "EXPIRED"
+        result["message"] = "Cookie c_user tidak ditemukan di file sesi"
+        return result
+    if not xs_val:
+        result["status"] = "EXPIRED"
+        result["message"] = "Cookie xs tidak ditemukan (sesi tidak valid untuk otentikasi FB)"
+        return result
+
+    # Cek expiration timestamp cookie c_user
+    c_user_cookie = next((c for c in cookies if c.get("name") == "c_user"), {})
+    exp = c_user_cookie.get("expires", 0)
+    if exp > 0 and exp < time.time():
+        result["status"] = "EXPIRED"
+        result["message"] = f"Cookie c_user telah kedaluwarsa (exp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(exp))})"
+        return result
+
+    # ── 2. Verifikasi via Playwright headless ──────────────────────────────
+    # Jalankan di thread terpisah dengan event loop baru agar tidak conflict
+    # dengan event loop FastAPI utama.
+    def playwright_check() -> Tuple[str, str]:
+        from playwright.async_api import async_playwright
+        from engine.browser import create_stealth_context, verify_login_status, check_account_restriction
+
+        # Buat event loop baru di thread ini
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def _check():
+            browser = None
+            context = None
+            try:
+                async with async_playwright() as p:
+                    browser, context = await create_stealth_context(
+                        p, session_file=session_file, headless=True
+                    )
+                    page = await context.new_page()
+
+                    # Navigasi ke Facebook home
+                    try:
+                        await page.goto(
+                            "https://www.facebook.com/",
+                            wait_until="domcontentloaded",
+                            timeout=20000
+                        )
+                    except Exception as nav_e:
+                        # Fallback: coba dengan wait_until="commit"
+                        try:
+                            await page.goto(
+                                "https://www.facebook.com/",
+                                wait_until="commit",
+                                timeout=12000
+                            )
+                        except Exception:
+                            return "UNKNOWN", f"Navigasi FB gagal: {nav_e}"
+
+                    await page.wait_for_timeout(2500)
+
+                    final_url = page.url.lower()
+
+                    # Cek URL login/checkpoint/recover
+                    if "login" in final_url or "recover" in final_url:
+                        return "EXPIRED", "Sesi kedaluwarsa (redirect ke halaman login)"
+                    if "checkpoint" in final_url or "two_step" in final_url:
+                        return "CHECKPOINT", "Akun terkena checkpoint FB (2FA/verifikasi)"
+
+                    # Cek cookie c_user SETELAH navigasi
+                    # FB kadang hapus c_user via Set-Cookie kalau sesi invalid di server
+                    cookies_after = await context.cookies()
+                    c_user_after = any(c.get("name") == "c_user" for c in cookies_after)
+                    if not c_user_after:
+                        # Cek apakah ini halaman profile-selector (multi-account)
+                        try:
+                            body_text = (await page.locator("body").inner_text(timeout=1500)).lower()
+                            if any(kw in body_text for kw in [
+                                "gunakan profil lain", "use another profile",
+                                "jelajahi hal-hal yang anda sukai"
+                            ]):
+                                # Profile selector — sesi valid tapi perlu klik Lanjutkan
+                                return "ACTIVE", "Sesi aktif (halaman profile-selector terdeteksi)"
+                            # Cek form login
+                            if any(kw in body_text for kw in ["masuk", "log in", "daftar", "sign up"]):
+                                return "EXPIRED", "Sesi kedaluwarsa (form login terlihat)"
+                        except Exception:
+                            pass
+                        return "EXPIRED", "Sesi kedaluwarsa (c_user dihapus FB setelah navigasi)"
+
+                    # c_user masih ada — cek checkpoint indicators di body
+                    try:
+                        body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
+                        for kw in config.CHECKPOINT_INDICATOR_TEXTS:
+                            if kw in body_text:
+                                return "CHECKPOINT", f"Halaman checkpoint terdeteksi: '{kw}'"
+                    except Exception:
+                        pass
+
+                    # Cek restriction
+                    is_res, res_reason = await check_account_restriction(page)
+                    if is_res:
+                        return "RESTRICTED", f"Akun dibatasi FB: {res_reason}"
+
+                    # Semua cek lolos — sesi aktif
+                    return "ACTIVE", "Sesi aktif & terverifikasi via Playwright"
+
+            except Exception as e:
+                err_msg = str(e) or type(e).__name__
+                # Playwright timeout atau browser crash
+                if "Target page, context or browser has been closed" in err_msg:
+                    return "UNKNOWN", "Browser ditutup sebelum verifikasi selesai"
+                return "UNKNOWN", f"Error verifikasi: {err_msg}"
+            finally:
+                try:
+                    if context: await context.close()
+                except Exception:
+                    pass
+                try:
+                    if browser: await browser.close()
+                except Exception:
+                    pass
+
+        try:
+            return loop.run_until_complete(_check())
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    try:
+        status, msg = await asyncio.to_thread(playwright_check)
+        result["status"] = status
+        result["message"] = msg
+    except Exception as e:
+        result["status"] = "UNKNOWN"
+        result["message"] = f"Error thread: {e}"
 
     return result
 
