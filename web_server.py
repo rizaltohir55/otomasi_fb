@@ -991,7 +991,8 @@ async def api_update_config(req: UpdateConfigRequest):
 # ── Runner Execution Endpoints ────────────────────────────────────────────────
 
 async def async_runner_wrapper(req: StartRunnerRequest):
-    runner_state.is_running = True
+    # NOTE: is_running sudah di-set True di start_runner (synchronous) untuk
+    # cegah race condition. Di sini hanya update last_status & active_sessions.
     runner_state.last_status = "RUNNING"
     runner_state.active_sessions = req.selected_sessions
     
@@ -1030,13 +1031,19 @@ async def async_runner_wrapper(req: StartRunnerRequest):
     try:
         if len(req.selected_sessions) == 1:
             # Single session worker (asinkron native di event loop FastAPI)
+            # Gunakan worker_tag dengan format SAMA dengan live_monitor.reset() pre-population
+            # (Akun-{idx} ({name})) supaya tidak muncul 2 card berbeda untuk akun yang sama.
             s_file = req.selected_sessions[0]
+            from engine.browser import generate_deterministic_profile
+            profile = generate_deterministic_profile(s_file)
+            acc_name = profile.get("account_name", os.path.basename(s_file))
+            worker_tag = f"Akun-1 ({acc_name})"
             log(f"⚡ Menjalankan Single Account Worker untuk: {os.path.basename(s_file)}")
             await worker_loop(
                 session_file=s_file,
                 groups=groups,
                 mode=req.mode,
-                worker_tag="WebWorker-1",
+                worker_tag=worker_tag,
                 headless=req.headless,
                 randomize_groups=req.randomize_groups
             )
@@ -1064,8 +1071,11 @@ async def async_runner_wrapper(req: StartRunnerRequest):
 
 @app.post("/api/runner/start")
 async def start_runner(req: StartRunnerRequest, background_tasks: BackgroundTasks):
+    # Race condition fix: set is_running = True SEBELUM spawn task.
+    # Sebelumnya is_running di-set di async_runner_wrapper (background),
+    # jadi 2 klik cepat bisa spawn 2 task sebelum flag ter-set.
     if runner_state.is_running:
-        raise HTTPException(status_code=400, detail="Otomasi sedang berjalan.")
+        raise HTTPException(status_code=400, detail="Otomasi sedang berjalan. Tunggu hingga selesai atau klik Hentikan.")
 
     if not req.selected_sessions:
         raise HTTPException(status_code=400, detail="Harap pilih minimal 1 sesi akun Facebook.")
@@ -1075,6 +1085,10 @@ async def start_runner(req: StartRunnerRequest, background_tasks: BackgroundTask
         validate_mode(req.mode)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
+
+    # Set is_running SEKARANG (synchronous) supaya klik kedua langsung ditolak
+    runner_state.is_running = True
+    runner_state.last_status = "STARTING"
 
     # Reset cancellation token dari sesi sebelumnya
     reset_global_cancel()
