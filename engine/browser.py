@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
 
 import config
-from utils.helpers import log
+from utils.helpers import log, auto_push_sessions
 
 
 import hashlib
@@ -265,6 +265,7 @@ async def save_session_state(context: BrowserContext, session_file: str, name: s
             except OSError:
                 pass
         log(f"💾 Sesi berhasil disimpan ke: {os.path.basename(session_file)}")
+        auto_push_sessions(session_file)
     except Exception as e:
         log(f"❌ Gagal menyimpan sesi ke {session_file}: {e}")
         # Cleanup dangling temp file

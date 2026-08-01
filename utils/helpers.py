@@ -47,8 +47,43 @@ def auto_pull_github():
             safe_print(f"⚠️ Catatan sinkronisasi GitHub: {output}")
     except subprocess.TimeoutExpired:
         safe_print("⚠️ Waktu sinkronisasi GitHub habis (timeout 15 detik), melanjutkan dengan kode saat ini.")
+def auto_push_sessions(session_file: str = ""):
+    """
+    Otomatis stage, commit, dan push file sesi Facebook (*.json) ke GitHub.
+    """
+    safe_print("⬆️ Menyinkronkan & mengunggah file sesi ke GitHub...")
+    try:
+        targets = ["fb_session*.json", "session/*.json", "groups.txt"]
+        if session_file and os.path.exists(session_file):
+            targets.append(session_file)
+
+        # Stage files
+        subprocess.run(["git", "add"] + targets, capture_output=True, text=True, timeout=10)
+
+        # Cek apakah ada perubahan yang di-stage
+        diff_res = subprocess.run(["git", "diff", "--staged", "--name-only"], capture_output=True, text=True, timeout=10)
+        staged_files = diff_res.stdout.strip()
+        if not staged_files:
+            safe_print("ℹ️ Tidak ada perubahan sesi baru yang perlu di-push.")
+            return
+
+        tag_name = os.path.basename(session_file) if session_file else "session files"
+        commit_msg = f"chore(session): update {tag_name} cookies & state"
+
+        commit_res = subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True, text=True, timeout=15)
+        if commit_res.returncode == 0:
+            push_res = subprocess.run(["git", "push", "origin", "main"], capture_output=True, text=True, timeout=30)
+            if push_res.returncode == 0:
+                safe_print(f"🚀 Sesi ({tag_name}) BERHASIL di-push ke GitHub!")
+            else:
+                err = push_res.stderr.strip() or push_res.stdout.strip()
+                safe_print(f"⚠️ Gagal push sesi ke GitHub: {err}")
+        else:
+            err = commit_res.stderr.strip() or commit_res.stdout.strip()
+            safe_print(f"⚠️ Gagal commit sesi: {err}")
     except Exception as e:
-        safe_print(f"⚠️ Tidak dapat mengeksekusi git pull: {e}")
+        safe_print(f"⚠️ Gagal auto-push sesi: {e}")
+
 
 
 
