@@ -23,6 +23,7 @@ from utils.retry import (
     get_global_cancel_token,
     reset_global_cancel,
 )
+from utils.helpers import acquire_account_lock, release_account_lock
 from engine.browser import (
     create_stealth_context,
     save_session_state,
@@ -243,6 +244,26 @@ async def worker_loop(
             "status": "RESTRICTED_COOLDOWN",
             "success_count": 0,
             "fail_count": len(worker_groups),
+            "total_groups": len(worker_groups),
+            "duration_sec": round(time.time() - start_time, 1),
+            "spoof_info": spoof_info
+        }
+
+    # ── Global Instance Lock: cegah 2 proses berjalan bersamaan untuk akun yang sama ──
+    # Ini mengatasi duplikasi posting saat:
+    # - User jalankan autopost.py 2x di terminal
+    # - User jalankan terminal + web server bersamaan
+    # - Web server di-trigger saat terminal sedang running
+    if c_user_id and not acquire_account_lock(c_user_id, worker_tag=worker_tag):
+        log(f"🔒 Akun [{worker_tag}] sedang diproses oleh instance lain. Skip untuk cegah duplikasi.", worker_tag)
+        notify_status("SKIPPED", step_msg="Akun sedang diproses oleh instance lain (lock aktif)")
+        return {
+            "session_file": session_file,
+            "worker_tag": worker_tag,
+            "account_name": account_name,
+            "status": "LOCKED_BY_OTHER",
+            "success_count": 0,
+            "fail_count": 0,
             "total_groups": len(worker_groups),
             "duration_sec": round(time.time() - start_time, 1),
             "spoof_info": spoof_info
@@ -549,6 +570,9 @@ async def worker_loop(
         # Selalu tutup browser dengan aman walau terjadi exception.
         # Ini mencegah zombie Chromium yang menguras RAM.
         await safe_browser_cleanup(browser=browser, context=context, page=page)
+        # Lepas lock supaya instance lain bisa jalan setelah ini selesai
+        if c_user_id:
+            release_account_lock(c_user_id)
 
 
 def _multiprocess_entry_point(

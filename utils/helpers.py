@@ -8,10 +8,82 @@ import sys
 import time
 import subprocess
 import asyncio
+import fcntl
 from datetime import datetime
-from typing import Tuple, Set
+from typing import Tuple, Set, Optional
 
 import config
+
+
+# ── Global Instance Lock ─────────────────────────────────────────────────────
+# Cegah 2 instance otomasi berjalan bersamaan untuk akun yang sama.
+# Pakai file lock di /tmp/otomasi_fb_{c_user}.lock dengan fcntl.flock.
+# File lock otomatis dilepas saat process exit (bahkan via kill -9).
+
+_LOCK_FILES: dict = {}  # c_user → file handle (keep open to hold lock)
+
+def acquire_account_lock(c_user: str, worker_tag: str = "") -> bool:
+    """
+    Acquire exclusive lock untuk akun tertentu (by c_user).
+    Return True jika berhasil (lock didapat), False jika akun sedang diproses instance lain.
+
+    Lock dipegang selama process hidup. Otomatis dilepas saat process exit.
+    """
+    if not c_user:
+        return True  # no c_user = no lock needed
+
+    lock_path = os.path.join("/tmp", f"otomasi_fb_{c_user}.lock")
+    try:
+        # Cek apakah lock sudah dipegang oleh process lain
+        if os.path.exists(lock_path):
+            try:
+                with open(lock_path, "r") as f:
+                    old_pid = int(f.read().strip())
+                # Cek apakah process itu masih hidup
+                # os.kill(pid, 0) raises:
+                # - ProcessLookupError (OSError) jika PID tidak ada → lock stale
+                # - PermissionError jika PID ada tapi tidak ada permission → lock valid
+                # - Tidak raise apa-apa jika PID ada dan punya permission → lock valid
+                try:
+                    os.kill(old_pid, 0)
+                    # Tidak raise → process ada dan punya permission → lock valid
+                    log(f"🔒 Akun c_user={c_user} sedang diproses oleh PID {old_pid}. Skip duplikasi.", worker_tag)
+                    return False
+                except ProcessLookupError:
+                    # Process tidak ditemukan → lock stale, hapus
+                    os.remove(lock_path)
+                except PermissionError:
+                    # Process ada tapi kita tidak punya permission untuk signal → lock valid
+                    log(f"🔒 Akun c_user={c_user} sedang diproses oleh PID {old_pid} (permission denied). Skip duplikasi.", worker_tag)
+                    return False
+                except OSError:
+                    # Error lain (termasuk PID 1 di container) → anggap lock valid (konservatif)
+                    log(f"🔒 Akun c_user={c_user} sedang diproses oleh PID {old_pid}. Skip duplikasi.", worker_tag)
+                    return False
+            except (ValueError, IOError):
+                pass
+
+        # Acquire lock dengan menulis PID ke file
+        with open(lock_path, "w") as f:
+            f.write(str(os.getpid()))
+        _LOCK_FILES[c_user] = lock_path
+        log(f"🔓 Lock acquired untuk c_user={c_user} (PID={os.getpid()})", worker_tag)
+        return True
+    except Exception as e:
+        log(f"⚠️ Gagal acquire lock untuk {c_user}: {e}. Lanjut tanpa lock.", worker_tag)
+        return True  # non-fatal: lanjut tanpa lock
+
+
+def release_account_lock(c_user: str):
+    """Lepas lock untuk akun tertentu."""
+    if not c_user:
+        return
+    lock_path = _LOCK_FILES.pop(c_user, None)
+    if lock_path and os.path.exists(lock_path):
+        try:
+            os.remove(lock_path)
+        except Exception:
+            pass
 
 
 def safe_print(msg: str):

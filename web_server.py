@@ -1090,6 +1090,37 @@ async def start_runner(req: StartRunnerRequest, background_tasks: BackgroundTask
     runner_state.is_running = True
     runner_state.last_status = "STARTING"
 
+    # Cek apakah ada instance lain (terminal CLI) yang sedang memproses akun yang sama
+    # via file lock. Kalau ada, tolak dengan pesan jelas.
+    from utils.helpers import acquire_account_lock
+    from engine.browser import get_session_info
+    locked_accounts = []
+    for s_path in req.selected_sessions:
+        info = get_session_info(s_path)
+        c_user = info.get("c_user", "")
+        if c_user:
+            lock_path = os.path.join("/tmp", f"otomasi_fb_{c_user}.lock")
+            if os.path.exists(lock_path):
+                try:
+                    with open(lock_path, "r") as f:
+                        old_pid = int(f.read().strip())
+                    try:
+                        os.kill(old_pid, 0)
+                        locked_accounts.append(f"{info.get('name', c_user)} (PID {old_pid})")
+                    except OSError:
+                        pass  # process mati, lock stale
+                except (ValueError, IOError):
+                    pass
+
+    if locked_accounts:
+        runner_state.is_running = False
+        runner_state.last_status = "IDLE"
+        names = ", ".join(locked_accounts)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Akun berikut sedang diproses oleh instance lain (terminal CLI?): {names}. Tunggu hingga selesai atau hentikan proses tersebut."
+        )
+
     # Reset cancellation token dari sesi sebelumnya
     reset_global_cancel()
 
