@@ -13,6 +13,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadCaption();
   loadMedia();
   loadConfig();
+  loadSkipList();
+  loadCooldown();
 
   // Connect Real-Time SSE Log Stream & Live Monitor
   initLogStream();
@@ -23,7 +25,107 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Auto Refresh Stats every 5 seconds
   setInterval(loadStats, 5000);
+  // Refresh skip-list & cooldown every 10 seconds
+  setInterval(loadSkipList, 10000);
+  setInterval(loadCooldown, 10000);
+
+  // Global error handlers
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("Unhandled promise rejection:", e.reason);
+    showToast("Terjadi error tidak terduga: " + (e.reason?.message || e.reason), "error", 5000);
+  });
+  window.addEventListener("error", (e) => {
+    console.error("Global error:", e.error);
+    showToast("Error: " + e.message, "error", 5000);
+  });
+
+  // beforeunload guard when automation is running
+  window.addEventListener("beforeunload", (e) => {
+    if (window._isAutomationRunning) {
+      e.preventDefault();
+      e.returnValue = "Otomasi sedang berjalan. Yakin ingin meninggalkan halaman?";
+      return e.returnValue;
+    }
+  });
+
+  // ESC key to close modals
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      document.querySelectorAll(".modal-overlay:not(.hidden)").forEach(m => {
+        m.classList.add("hidden");
+      });
+    }
+  });
+
+  // Click on modal overlay (outside card) to close
+  document.querySelectorAll(".modal-overlay").forEach(overlay => {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        overlay.classList.add("hidden");
+      }
+    });
+  });
 });
+
+
+// ── 0. UTILITIES ──────────────────────────────────────────────────────────────
+
+/**
+ * Escape HTML special characters in a string to prevent XSS via innerHTML.
+ * Use this for ANY value sourced from the server (account name, group URL, step_msg, etc.)
+ */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Safe attribute escape (for href, data-*, etc.)
+ */
+function escapeAttr(str) {
+  return escapeHtml(str);
+}
+
+/**
+ * Wrapper around fetch() that:
+ * - Always returns {ok, json, status} tuple
+ * - Catches network errors
+ * - Handles non-JSON responses gracefully
+ * - Never throws (caller checks .ok)
+ */
+async function apiFetch(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    let json = null;
+    try {
+      json = await res.json();
+    } catch (e) {
+      // Response is not JSON (e.g., HTML error page from proxy)
+      json = { status: "error", message: `HTTP ${res.status}: respons bukan JSON` };
+    }
+    return { ok: res.ok, status: res.status, json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      json: { status: "error", message: `Network error: ${err.message}` }
+    };
+  }
+}
+
+/**
+ * Extract human-readable error message from API response.
+ * Backend success: {status, message}; FastAPI error: {detail}; others: fallback.
+ */
+function getApiError(json) {
+  if (!json) return "Unknown error";
+  return json.detail || json.message || json.error || "Operasi gagal";
+}
 
 
 // ── 1. NAVIGATION & TAB CONTROLLER ───────────────────────────────────────────
@@ -78,68 +180,73 @@ function showToast(message, type = "info", duration = 3500) {
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  toast.setAttribute("role", "alert");
+  toast.setAttribute("aria-live", "polite");
 
   let icon = "fa-circle-info";
   if (type === "success") icon = "fa-circle-check";
   else if (type === "error") icon = "fa-circle-xmark";
   else if (type === "warning") icon = "fa-triangle-exclamation";
 
+  // Escape message to prevent XSS — message can contain server-controlled text
   toast.innerHTML = `
-    <i class="fa-solid ${icon}"></i>
-    <span>${message}</span>
-    <button class="toast-close">&times;</button>
+    <i class="fa-solid ${icon}" aria-hidden="true"></i>
+    <span>${escapeHtml(message)}</span>
+    <button class="toast-close" aria-label="Tutup notifikasi">&times;</button>
   `;
 
+  let fadeTimer = null;
   toast.querySelector(".toast-close").addEventListener("click", () => {
+    if (fadeTimer) clearTimeout(fadeTimer);
     toast.remove();
   });
 
   container.appendChild(toast);
 
-  setTimeout(() => {
+  fadeTimer = setTimeout(() => {
     toast.classList.add("fade-out");
-    setTimeout(() => toast.remove(), 400);
+    fadeTimer = setTimeout(() => toast.remove(), 400);
   }, duration);
 }
 
 
 // ── 2. DATA LOADERS ───────────────────────────────────────────────────────────
 async function loadStats() {
-  try {
-    const res = await fetch("/api/stats");
-    const json = await res.json();
-    if (json.status === "success") {
-      const d = json.data;
-      document.getElementById("stat-total-accounts").textContent = d.total_accounts;
-      document.getElementById("stat-total-groups").textContent = d.total_groups;
-      document.getElementById("stat-total-media").textContent = d.total_media;
-      document.getElementById("stat-runner-status").textContent = d.runner_status;
+  const { ok, json } = await apiFetch("/api/stats");
+  if (!ok || json.status !== "success") {
+    console.error("Gagal memuat stats:", getApiError(json));
+    return;
+  }
+  const d = json.data;
+  document.getElementById("stat-total-accounts").textContent = d.total_accounts;
+  document.getElementById("stat-total-groups").textContent = d.total_groups;
+  document.getElementById("stat-total-media").textContent = d.total_media;
+  document.getElementById("stat-runner-status").textContent = d.runner_status;
 
-      document.getElementById("badge-account-count").textContent = d.total_accounts;
-      document.getElementById("badge-group-count").textContent = d.total_groups;
+  document.getElementById("badge-account-count").textContent = d.total_accounts;
+  document.getElementById("badge-group-count").textContent = d.total_groups;
 
-      const statusPill = document.getElementById("status-pill");
-      const statusText = document.getElementById("status-text");
-      const btnStart = document.getElementById("btn-start-automation");
-      const btnStop = document.getElementById("btn-stop-automation");
-      const floatingBar = document.getElementById("floating-runner-bar");
+  const statusPill = document.getElementById("status-pill");
+  const statusText = document.getElementById("status-text");
+  const btnStart = document.getElementById("btn-start-automation");
+  const btnStop = document.getElementById("btn-stop-automation");
+  const floatingBar = document.getElementById("floating-runner-bar");
 
-      if (d.is_running) {
-        statusPill.classList.add("running");
-        statusText.textContent = `RUNNING (${d.active_workers} WORKERS)`;
-        if (btnStart) btnStart.classList.add("hidden");
-        if (btnStop) btnStop.classList.remove("hidden");
-        if (floatingBar) floatingBar.classList.remove("hidden");
-      } else {
-        statusPill.classList.remove("running");
-        statusText.textContent = "IDLE / SIAP";
-        if (btnStart) btnStart.classList.remove("hidden");
-        if (btnStop) btnStop.classList.add("hidden");
-        if (floatingBar) floatingBar.classList.add("hidden");
-      }
-    }
-  } catch (err) {
-    console.error("Gagal memuat stats:", err);
+  // Track running state for beforeunload guard
+  window._isAutomationRunning = !!d.is_running;
+
+  if (d.is_running) {
+    statusPill.classList.add("running");
+    statusText.textContent = `RUNNING (${d.active_workers} WORKERS)`;
+    if (btnStart) btnStart.classList.add("hidden");
+    if (btnStop) btnStop.classList.remove("hidden");
+    if (floatingBar) floatingBar.classList.remove("hidden");
+  } else {
+    statusPill.classList.remove("running");
+    statusText.textContent = "IDLE / SIAP";
+    if (btnStart) btnStart.classList.remove("hidden");
+    if (btnStop) btnStop.classList.add("hidden");
+    if (floatingBar) floatingBar.classList.add("hidden");
   }
 }
 
@@ -165,85 +272,199 @@ async function loadSessions(statusMap = null) {
   const checkboxContainer = document.getElementById("custom-acc-checkboxes");
   // Merge status cache jika ada data baru dari verify-all
   if (statusMap) Object.assign(_verifyStatusCache, statusMap);
-  
-  try {
-    const res = await fetch("/api/sessions");
-    const json = await res.json();
-    
-    if (json.status === "success") {
-      const sessions = json.sessions;
-      
-      if (!sessions || sessions.length === 0) {
-        container.innerHTML = `
-          <div class="card-panel" style="grid-column: 1/-1; text-align: center; padding: 40px;">
-            <i class="fa-solid fa-folder-open" style="font-size: 48px; color: var(--text-dim); margin-bottom: 12px;"></i>
-            <h3>Belum Ada Akun Facebook Tersimpan</h3>
-            <p class="text-muted" style="margin-top: 6px;">Klik tombol "Login Akun Baru" di atas untuk menambahkan akun pertama Anda.</p>
-          </div>
-        `;
-        if (checkboxContainer) checkboxContainer.innerHTML = "<p class='text-muted'>Belum ada akun.</p>";
-        return;
-      }
 
-      // Render Account Cards
-      container.innerHTML = sessions.map(s => {
-        const name = s.name || "Akun Facebook";
-        const c_user = s.c_user || "Unknown";
-        const filename = s.path ? s.path.split(/[\\/]/).pop() : "";
-        const cachedStatus = _verifyStatusCache[s.path];
-        const badgeHTML = cachedStatus ? getStatusBadgeHTML(cachedStatus.status) : '';
-        const statusMsg = cachedStatus ? `<small style="color:var(--text-dim);display:block;margin-top:4px;">${cachedStatus.message}</small>` : '';
-        
-        return `
-          <div class="account-card" data-path="${s.path}" id="acc-card-${c_user}">
-            <div class="acc-header">
-              <div class="acc-avatar">${name.charAt(0).toUpperCase()}</div>
-              <div class="acc-details">
-                <h4>${name}</h4>
-                <code>ID: ${c_user}</code>
-                ${badgeHTML}
-                ${statusMsg}
-              </div>
-            </div>
-            <div class="acc-path" title="${s.path}">${filename}</div>
-            <div class="acc-actions">
-              <button class="btn btn-sm btn-outline btn-verify-acc" data-path="${s.path}" data-cuser="${c_user}"><i class="fa-solid fa-shield-cat"></i> Cek Status</button>
-              <button class="btn btn-sm btn-outline btn-relogin-acc" data-path="${s.path}"><i class="fa-solid fa-arrows-rotate"></i> Relogin</button>
-              <button class="btn btn-sm btn-outline btn-rename-acc" data-path="${s.path}" data-name="${name}"><i class="fa-solid fa-pen"></i></button>
-              <button class="btn btn-sm btn-danger btn-delete-acc" data-path="${s.path}"><i class="fa-solid fa-trash"></i></button>
-            </div>
-          </div>
-        `;
-      }).join("");
-
-      // Render Custom Account Checkboxes for Poster tab
-      if (checkboxContainer) {
-        checkboxContainer.innerHTML = sessions.map((s, idx) => `
-          <label class="checkbox-label" style="margin-bottom: 8px;">
-            <input type="checkbox" name="selected-acc" value="${s.path}" checked>
-            <span>👤 ${s.name || "Akun"} (ID: ${s.c_user})</span>
-          </label>
-        `).join("");
-      }
-
-      attachAccountCardListeners();
+  const { ok, json } = await apiFetch("/api/sessions");
+  if (!ok || json.status !== "success") {
+    // Show error state instead of infinite spinner
+    if (container) {
+      container.innerHTML = `
+        <div class="card-panel" style="grid-column: 1/-1; text-align: center; padding: 40px;">
+          <i class="fa-solid fa-triangle-exclamation" style="font-size: 48px; color: var(--danger); margin-bottom: 12px;"></i>
+          <h3>Gagal Memuat Daftar Akun</h3>
+          <p class="text-muted" style="margin-top: 6px;">${escapeHtml(getApiError(json))}</p>
+          <button class="btn btn-primary" style="margin-top: 12px;" onclick="loadSessions()"><i class="fa-solid fa-rotate"></i> Coba Lagi</button>
+        </div>
+      `;
     }
-  } catch (err) {
-    console.error("Gagal memuat sesi:", err);
+    return;
   }
+
+  const sessions = json.sessions || [];
+
+  if (sessions.length === 0) {
+    container.innerHTML = `
+      <div class="card-panel" style="grid-column: 1/-1; text-align: center; padding: 40px;">
+        <i class="fa-solid fa-folder-open" style="font-size: 48px; color: var(--text-dim); margin-bottom: 12px;"></i>
+        <h3>Belum Ada Akun Facebook Tersimpan</h3>
+        <p class="text-muted" style="margin-top: 6px;">Klik tombol "Login Akun Baru" di atas untuk menambahkan akun pertama Anda.</p>
+      </div>
+    `;
+    if (checkboxContainer) checkboxContainer.innerHTML = "<p class='text-muted'>Belum ada akun.</p>";
+    return;
+  }
+
+  // Render Account Cards — ALL server fields escaped
+  container.innerHTML = sessions.map(s => {
+    const rawName = s.name || "Akun Facebook";
+    const initial = rawName.charAt(0).toUpperCase();
+    const name = escapeHtml(rawName);
+    const c_user = escapeHtml(s.c_user || "Unknown");
+    const path = escapeAttr(s.path || "");
+    const filename = escapeHtml(s.path ? s.path.split(/[\\/]/).pop() : "");
+    const cachedStatus = _verifyStatusCache[s.path];
+    const badgeHTML = cachedStatus ? getStatusBadgeHTML(cachedStatus.status) : '';
+    const statusMsg = cachedStatus ? `<small style="color:var(--text-dim);display:block;margin-top:4px;">${escapeHtml(cachedStatus.message)}</small>` : '';
+    const xsPresent = s.xs_present === true;
+    const xsBadge = xsPresent
+      ? ''
+      : `<span class="acc-status-badge expired" title="Cookie xs tidak ditemukan — sesi tidak valid untuk otentikasi FB"><i class="fa-solid fa-cookie-bite"></i> xs MISSING</span>`;
+
+    return `
+      <div class="account-card" data-path="${path}" id="acc-card-${c_user}">
+        <div class="acc-header">
+          <div class="acc-avatar">${escapeHtml(initial)}</div>
+          <div class="acc-details">
+            <h4>${name}</h4>
+            <code>ID: ${c_user}</code>
+            ${xsBadge}
+            ${badgeHTML}
+            ${statusMsg}
+          </div>
+        </div>
+        <div class="acc-path" title="${escapeAttr(s.path || "")}">${filename}</div>
+        <div class="acc-actions">
+          <button class="btn btn-sm btn-outline btn-verify-acc" data-path="${path}" data-cuser="${c_user}" aria-label="Cek status sesi"><i class="fa-solid fa-shield-cat"></i> Cek Status</button>
+          <button class="btn btn-sm btn-outline btn-relogin-acc" data-path="${path}" aria-label="Relogin akun"><i class="fa-solid fa-arrows-rotate"></i> Relogin</button>
+          <button class="btn btn-sm btn-outline btn-rename-acc" data-path="${path}" data-name="${name}" aria-label="Ubah nama akun"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn btn-sm btn-danger btn-delete-acc" data-path="${path}" aria-label="Hapus akun"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Render Custom Account Checkboxes — unchecked by default (user chooses which to use)
+  if (checkboxContainer) {
+    checkboxContainer.innerHTML = sessions.map(s => `
+      <label class="checkbox-label" style="margin-bottom: 8px;">
+        <input type="checkbox" name="selected-acc" value="${escapeAttr(s.path)}">
+        <span>👤 ${escapeHtml(s.name || "Akun")} (ID: ${escapeHtml(s.c_user)})</span>
+      </label>
+    `).join("");
+  }
+
+  attachAccountCardListeners();
 }
+
+
+// ── SKIP-LIST & COOLDOWN LOADERS (NEW) ────────────────────────────────────────
+
+async function loadSkipList() {
+  const container = document.getElementById("skip-list-container");
+  if (!container) return;
+
+  const { ok, json } = await apiFetch("/api/runner/skip-list");
+  if (!ok || json.status !== "success") {
+    container.innerHTML = `<div class="empty-monitor-notice"><i class="fa-solid fa-triangle-exclamation"></i><p>Gagal memuat skip-list: ${escapeHtml(getApiError(json))}</p></div>`;
+    return;
+  }
+
+  const items = json.skip_list || [];
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div class="empty-monitor-notice">
+        <i class="fa-solid fa-circle-check"></i>
+        <p>Belum ada grup di skip-list.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div style="margin-bottom:8px;color:var(--text-dim);font-size:0.9em;">
+      <strong>${items.length}</strong> grup di skip-list:
+    </div>
+    <div class="skip-list-items">
+      ${items.map(item => `
+        <div class="skip-list-item">
+          <code title="${escapeAttr(item.url)}">${escapeHtml(item.url.length > 80 ? item.url.slice(0, 77) + '...' : item.url)}</code>
+          <span class="skip-reason">${escapeHtml(item.reason || 'failed')}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function loadCooldown() {
+  const container = document.getElementById("cooldown-container");
+  if (!container) return;
+
+  const { ok, json } = await apiFetch("/api/runner/cooldown");
+  if (!ok || json.status !== "success") {
+    container.innerHTML = `<div class="empty-monitor-notice"><i class="fa-solid fa-triangle-exclamation"></i><p>Gagal memuat cooldown: ${escapeHtml(getApiError(json))}</p></div>`;
+    return;
+  }
+
+  const items = json.cooldown || [];
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div class="empty-monitor-notice">
+        <i class="fa-solid fa-circle-check"></i>
+        <p>Tidak ada akun dalam cooldown.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div style="margin-bottom:8px;color:var(--text-dim);font-size:0.9em;">
+      <strong>${items.length}</strong> akun dalam cooldown RESTRICTED:
+    </div>
+    <div class="cooldown-items">
+      ${items.map(item => {
+        const remainingMin = Math.max(0, Math.ceil((item.remaining_sec || 0) / 60));
+        const expiryDate = new Date((item.expires_at || 0) * 1000);
+        return `
+          <div class="cooldown-item">
+            <div>
+              <code>c_user: ${escapeHtml(item.c_user)}</code>
+              <span class="cooldown-remaining" title="Expires: ${escapeAttr(expiryDate.toLocaleString())}">
+                ⏳ ${remainingMin} menit tersisa
+              </span>
+            </div>
+            <button class="btn btn-sm btn-outline btn-release-cooldown" data-cuser="${escapeAttr(item.c_user)}" aria-label="Lepas cooldown untuk akun ini">
+              <i class="fa-solid fa-unlock"></i> Lepas
+            </button>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  // Attach release-cooldown button handlers
+  container.querySelectorAll(".btn-release-cooldown").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const cuser = btn.getAttribute("data-cuser");
+      const { ok, json } = await apiFetch(`/api/runner/cooldown?c_user=${encodeURIComponent(cuser)}`, { method: "DELETE" });
+      if (ok && json.status === "success") {
+        showToast(`✅ Cooldown dilepas untuk c_user ${cuser}`, "success");
+        loadCooldown();
+      } else {
+        showToast(`❌ Gagal: ${getApiError(json)}`, "error");
+      }
+    });
+  });
+}
+
 
 async function loadGroups() {
   const textarea = document.getElementById("groups-textarea");
-  try {
-    const res = await fetch("/api/groups");
-    const json = await res.json();
-    if (json.status === "success") {
-      textarea.value = json.raw_content || json.groups.join("\n");
-      updateGroupsCount();
-    }
-  } catch (err) {
-    console.error("Gagal memuat grup:", err);
+  if (!textarea) return;
+  const { ok, json } = await apiFetch("/api/groups");
+  if (ok && json.status === "success") {
+    textarea.value = json.raw_content || (json.groups || []).join("\n");
+    updateGroupsCount();
+  } else {
+    console.error("Gagal memuat grup:", getApiError(json));
   }
 }
 
@@ -257,66 +478,87 @@ function updateGroupsCount() {
 
 async function loadCaption() {
   const textarea = document.getElementById("post-caption-textarea");
-  try {
-    const res = await fetch("/api/caption");
-    const json = await res.json();
-    if (json.status === "success" && textarea) {
-      textarea.value = json.caption;
-    }
-  } catch (err) {
-    console.error("Gagal memuat caption:", err);
+  if (!textarea) return;
+  const { ok, json } = await apiFetch("/api/caption");
+  if (ok && json.status === "success") {
+    textarea.value = json.caption || "";
+  } else {
+    console.error("Gagal memuat caption:", getApiError(json));
   }
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return `${bytes.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 async function loadMedia() {
   const container = document.getElementById("media-gallery");
-  try {
-    const res = await fetch("/api/media");
-    const json = await res.json();
-    if (json.status === "success" && container) {
-      const items = json.media;
-      if (!items || items.length === 0) {
-        container.innerHTML = "<p class='text-muted' style='grid-column: 1/-1;'>Belum ada media foto/video diunggah.</p>";
-        return;
-      }
-
-      container.innerHTML = items.map(m => `
-        <div class="media-thumb" title="${m.name}">
-          <img src="${m.url}" alt="${m.name}">
-          <button class="media-thumb-del" data-filename="${m.name}">&times;</button>
-        </div>
-      `).join("");
-
-      document.querySelectorAll(".media-thumb-del").forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const fname = btn.getAttribute("data-filename");
-          await fetch(`/api/media?filename=${encodeURIComponent(fname)}`, { method: "DELETE" });
-          loadMedia();
-          loadStats();
-        });
-      });
-    }
-  } catch (err) {
-    console.error("Gagal memuat media:", err);
+  if (!container) return;
+  const { ok, json } = await apiFetch("/api/media");
+  if (!ok || json.status !== "success") {
+    console.error("Gagal memuat media:", getApiError(json));
+    return;
   }
+  const items = json.media || [];
+  if (items.length === 0) {
+    container.innerHTML = "<p class='text-muted' style='grid-column: 1/-1;'>Belum ada media foto/video diunggah.</p>";
+    return;
+  }
+
+  container.innerHTML = items.map(m => {
+    const name = escapeHtml(m.name || "");
+    const url = escapeAttr(m.url || "");
+    const sizeStr = formatBytes(m.size);
+    return `
+      <div class="media-thumb" title="${name}">
+        <img src="${url}" alt="${name}">
+        <button class="media-thumb-del" data-filename="${escapeAttr(m.name)}" aria-label="Hapus ${name}">&times;</button>
+        <div class="media-thumb-info">
+          <small>${name}</small>
+          <small class="text-muted">${sizeStr}</small>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  document.querySelectorAll(".media-thumb-del").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const fname = btn.getAttribute("data-filename");
+      if (!confirm(`Hapus file media "${fname}"?`)) return;
+      const { ok, json } = await apiFetch(`/api/media?filename=${encodeURIComponent(fname)}`, { method: "DELETE" });
+      if (ok && json.status === "success") {
+        showToast(`🗑️ Media ${fname} dihapus`, "success");
+        loadMedia();
+        loadStats();
+      } else {
+        showToast(`❌ Gagal hapus media: ${getApiError(json)}`, "error");
+      }
+    });
+  });
 }
 
 async function loadConfig() {
-  try {
-    const res = await fetch("/api/config");
-    const json = await res.json();
-    if (json.status === "success") {
-      const cfg = json.config;
-      document.getElementById("cfg-delay-min").value = cfg.delay_min;
-      document.getElementById("cfg-delay-max").value = cfg.delay_max;
-      document.getElementById("cfg-max-workers").value = cfg.max_workers;
-      document.getElementById("cfg-headless").value = String(cfg.default_headless);
-      document.getElementById("cfg-auto-like").checked = cfg.auto_like;
-      document.getElementById("cfg-auto-comment").checked = cfg.auto_comment;
-    }
-  } catch (err) {
-    console.error("Gagal memuat konfigurasi:", err);
+  const { ok, json } = await apiFetch("/api/config");
+  if (!ok || json.status !== "success") {
+    console.error("Gagal memuat konfigurasi:", getApiError(json));
+    return;
+  }
+  const cfg = json.config;
+  document.getElementById("cfg-delay-min").value = cfg.delay_min;
+  document.getElementById("cfg-delay-max").value = cfg.delay_max;
+  document.getElementById("cfg-max-workers").value = cfg.max_workers;
+  document.getElementById("cfg-headless").value = String(cfg.default_headless);
+  document.getElementById("cfg-auto-like").checked = cfg.auto_like;
+  document.getElementById("cfg-auto-comment").checked = cfg.auto_comment;
+  // Populate auto_comments textarea (one per line)
+  const commentsEl = document.getElementById("cfg-auto-comments");
+  if (commentsEl && Array.isArray(cfg.auto_comments)) {
+    commentsEl.value = cfg.auto_comments.join("\n");
   }
 }
 
@@ -340,10 +582,17 @@ function initLiveMonitor() {
 
   if (btnMonStop) {
     btnMonStop.addEventListener("click", async () => {
-      if (confirm("Apakah Anda yakin ingin menghentikan eksekusi otomasi?")) {
-        const res = await fetch("/api/runner/stop", { method: "POST" });
-        const json = await res.json();
-        alert(json.message);
+      if (!confirm("Apakah Anda yakin ingin menghentikan eksekusi otomasi?")) return;
+      btnMonStop.disabled = true;
+      btnMonStop.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menghentikan...';
+      const { ok, json } = await apiFetch("/api/runner/stop", { method: "POST" });
+      btnMonStop.disabled = false;
+      btnMonStop.innerHTML = '<i class="fa-solid fa-circle-stop"></i> Hentikan Otomasi';
+      if (ok && json.status === "success") {
+        showToast("🛑 " + (json.message || "Sinyal pembatalan dikirim"), "warning");
+        loadStats();
+      } else {
+        showToast("❌ Gagal menghentikan: " + getApiError(json), "error");
       }
     });
   }
@@ -354,20 +603,33 @@ function initLiveMonitor() {
     });
   }
 
-  // Poll live status every 1 second
+  // Poll live status every 1 second (with in-flight guard)
   setInterval(pollLiveStatus, 1000);
 }
 
+let _pollLiveStatusInFlight = false;
 async function pollLiveStatus() {
+  if (_pollLiveStatusInFlight) return;
+  _pollLiveStatusInFlight = true;
   try {
-    const res = await fetch("/api/runner/live-status");
-    const json = await res.json();
-    if (json.status === "success") {
+    const { ok, json } = await apiFetch("/api/runner/live-status");
+    if (ok && json.status === "success") {
       renderLiveMonitor(json.data);
     }
-  } catch (err) {
-    // Silent fetch error
+  } finally {
+    _pollLiveStatusInFlight = false;
   }
+}
+
+/**
+ * Validate a URL is safe to render as <a href>.
+ * Rejects javascript:, data:, vbscript: schemes — only allow http/https.
+ */
+function safeUrl(url) {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return null;
 }
 
 function renderLiveMonitor(d) {
@@ -428,7 +690,7 @@ function renderLiveMonitor(d) {
   if (statFail) statFail.textContent = d.total_fail;
   if (statWorkers) statWorkers.textContent = d.active_workers_count;
 
-  // Render Worker Cards
+  // Render Worker Cards — ALL server fields escaped to prevent XSS
   if (workersContainer) {
     const workers = d.workers || [];
     if (workers.length === 0) {
@@ -440,18 +702,24 @@ function renderLiveMonitor(d) {
       `;
     } else {
       workersContainer.innerHTML = workers.map(w => {
-        const name = w.account_name || "Akun Facebook";
-        const initial = name.charAt(0).toUpperCase();
-        const statusStr = (w.status || "IDLE").toLowerCase();
+        const rawName = w.account_name || "Akun Facebook";
+        const initial = escapeHtml(rawName.charAt(0).toUpperCase());
+        const name = escapeHtml(rawName);
+        const statusStr = escapeAttr((w.status || "IDLE").toLowerCase());
+        const statusLabel = escapeHtml(w.status || "IDLE");
         const currGrp = w.current_group || "";
-        const grpDisplay = currGrp ? `<a href="${currGrp}" target="_blank" rel="noopener">${currGrp}</a>` : "Belum memilih grup";
+        const safeGrpUrl = safeUrl(currGrp);
+        const grpDisplay = safeGrpUrl
+          ? `<a href="${escapeAttr(safeGrpUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(safeGrpUrl)}</a>`
+          : (currGrp ? `<code>${escapeHtml(currGrp)}</code>` : "Belum memilih grup");
         const delayRem = w.delay_remaining || 0.0;
-        
+
         let cardClass = "worker-live-card";
         if (statusStr === "processing") cardClass += " active";
         else if (statusStr === "waiting_delay") cardClass += " waiting";
         else if (statusStr === "completed") cardClass += " completed";
         else if (statusStr === "expired") cardClass += " expired";
+        else if (statusStr === "restricted" || statusStr === "rate_limited") cardClass += " expired";
 
         return `
           <div class="${cardClass}">
@@ -460,23 +728,23 @@ function renderLiveMonitor(d) {
                 <div class="worker-avatar">${initial}</div>
                 <div class="worker-info">
                   <h5>${name}</h5>
-                  <span class="worker-tag-badge">${w.worker_tag}</span>
+                  <span class="worker-tag-badge">${escapeHtml(w.worker_tag || "")}</span>
                 </div>
               </div>
-              <span class="worker-status-tag ${statusStr}">${w.status}</span>
+              <span class="worker-status-tag ${statusStr}">${statusLabel}</span>
             </div>
 
             <div class="worker-spoof-pill" title="Hardware Fingerprint Spoofed">
-              <i class="fa-solid fa-microchip"></i> ${w.spoof_info || "Hardware Spoofed"}
+              <i class="fa-solid fa-microchip"></i> ${escapeHtml(w.spoof_info || "Hardware Spoofed")}
             </div>
 
             <div class="worker-mini-progress">
               <div class="mini-progress-text">
                 <span>Progress Akun</span>
-                <span>${w.current_idx} / ${w.total_groups} (${w.progress_percent || 0}%)</span>
+                <span>${escapeHtml(String(w.current_idx || 0))} / ${escapeHtml(String(w.total_groups || 0))} (${escapeHtml(String(w.progress_percent || 0))}%)</span>
               </div>
               <div class="mini-progress-bar">
-                <div class="mini-progress-fill" style="width: ${w.progress_percent || 0}%;"></div>
+                <div class="mini-progress-fill" style="width: ${escapeAttr(String(w.progress_percent || 0))}%;"></div>
               </div>
             </div>
 
@@ -492,7 +760,7 @@ function renderLiveMonitor(d) {
             ` : ""}
 
             <div class="worker-last-action">
-              💬 ${w.step_msg || "Menunggu aksi selanjutnya..."}
+              💬 ${escapeHtml(w.step_msg || "Menunggu aksi selanjutnya...")}
             </div>
           </div>
         `;
@@ -500,7 +768,7 @@ function renderLiveMonitor(d) {
     }
   }
 
-  // Render Activity Stream Log
+  // Render Activity Stream Log — escaped
   if (activityStream) {
     const events = d.recent_events || [];
     if (events.length === 0) {
@@ -512,11 +780,11 @@ function renderLiveMonitor(d) {
       `;
     } else {
       activityStream.innerHTML = events.map(e => {
-        const typeClass = (e.type || "system").toLowerCase();
+        const typeClass = escapeAttr((e.type || "system").toLowerCase());
         return `
           <div class="stream-line ${typeClass}">
-            <span class="stream-time">[${e.timestamp}]</span>
-            <span class="stream-msg"><strong>[${e.worker_tag}]</strong> ${e.message}</span>
+            <span class="stream-time">[${escapeHtml(e.timestamp || "")}]</span>
+            <span class="stream-msg"><strong>[${escapeHtml(e.worker_tag || "")}]</strong> ${escapeHtml(e.message || "")}</span>
           </div>
         `;
       }).join("");
@@ -526,6 +794,8 @@ function renderLiveMonitor(d) {
 
 
 // ── 4. LOG TERMINAL SSE STREAM ───────────────────────────────────────────────
+const MAX_LOG_LINES = 500;
+
 function initLogStream() {
   const terminalOutput = document.getElementById("terminal-output");
   const autoscrollToggle = document.getElementById("autoscroll-toggle");
@@ -543,9 +813,14 @@ function initLogStream() {
     }
   };
 
+  evtSource.onerror = () => {
+    // Browser auto-reconnects; show transient notice only on first error
+    appendLogLine("[System] Koneksi SSE terputus. Mencoba menghubungkan ulang...");
+  };
+
   function appendLogLine(msg) {
     if (!terminalOutput) return;
-    
+
     let lineClass = "info";
     if (msg.includes("❌") || msg.includes("Gagal") || msg.includes("Error")) lineClass = "error";
     else if (msg.includes("🎉") || msg.includes("✅") || msg.includes("Sukses")) lineClass = "success";
@@ -555,6 +830,11 @@ function initLogStream() {
     div.className = `log-line ${lineClass}`;
     div.textContent = msg;
     terminalOutput.appendChild(div);
+
+    // Cap log lines to prevent DOM bloat & scroll lag
+    while (terminalOutput.children.length > MAX_LOG_LINES) {
+      terminalOutput.removeChild(terminalOutput.firstChild);
+    }
 
     if (autoscrollToggle && autoscrollToggle.checked) {
       terminalOutput.scrollTop = terminalOutput.scrollHeight;
@@ -668,31 +948,69 @@ function initEventHandlers() {
   if (btnSaveGroups) {
     btnSaveGroups.addEventListener("click", async () => {
       const lines = groupsTextarea.value.split("\n");
-      const res = await fetch("/api/groups", {
+      const { ok, json } = await apiFetch("/api/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groups: lines })
       });
-      const json = await res.json();
-      showToast(json.message, "success");
-      loadStats();
+      if (ok && json.status === "success") {
+        showToast(`✅ ${json.message}`, "success");
+        loadStats();
+      } else {
+        showToast("❌ Gagal simpan grup: " + getApiError(json), "error");
+      }
     });
   }
 
   if (btnCleanGroups) {
     btnCleanGroups.addEventListener("click", async () => {
-      const res = await fetch("/api/groups/clean", { method: "POST" });
-      const json = await res.json();
-      if (json.status === "success") {
-        groupsTextarea.value = json.raw_content;
+      const { ok, json } = await apiFetch("/api/groups/clean", { method: "POST" });
+      if (ok && json.status === "success") {
+        groupsTextarea.value = json.raw_content || (json.groups || []).join("\n");
         updateGroupsCount();
-        showToast(`🧹 Pembersihan Selesai: ${json.message}`, "success");
+        showToast(`🧹 ${json.message}`, "success");
         loadStats();
+      } else {
+        showToast("❌ Gagal clean grup: " + getApiError(json), "error");
       }
     });
   }
 
   if (btnTriggerCollect) btnTriggerCollect.addEventListener("click", triggerCollectGroups);
+
+  // Skip-list clear button
+  const btnClearSkipList = document.getElementById("btn-clear-skiplist");
+  if (btnClearSkipList) {
+    btnClearSkipList.addEventListener("click", async () => {
+      if (!confirm("Bersihkan seluruh skip-list grup? Grup yang sudah ditandai gagal akan bisa di-retry lagi.")) return;
+      const { ok, json } = await apiFetch("/api/runner/skip-list", { method: "DELETE" });
+      if (ok && json.status === "success") {
+        showToast("🧹 Skip-list dibersihkan", "success");
+        loadSkipList();
+      } else {
+        showToast("❌ Gagal: " + getApiError(json), "error");
+      }
+    });
+  }
+  const btnRefreshSkipList = document.getElementById("btn-refresh-skiplist");
+  if (btnRefreshSkipList) btnRefreshSkipList.addEventListener("click", loadSkipList);
+
+  // Cooldown clear button
+  const btnClearCooldown = document.getElementById("btn-clear-cooldown");
+  if (btnClearCooldown) {
+    btnClearCooldown.addEventListener("click", async () => {
+      if (!confirm("Bersihkan seluruh cooldown RESTRICTED? Akun-akun tersebut akan bisa dipakai lagi segera.")) return;
+      const { ok, json } = await apiFetch("/api/runner/cooldown", { method: "DELETE" });
+      if (ok && json.status === "success") {
+        showToast("🛡️ Cooldown dibersihkan", "success");
+        loadCooldown();
+      } else {
+        showToast("❌ Gagal: " + getApiError(json), "error");
+      }
+    });
+  }
+  const btnRefreshCooldown = document.getElementById("btn-refresh-cooldown");
+  if (btnRefreshCooldown) btnRefreshCooldown.addEventListener("click", loadCooldown);
   if (groupsTextarea) groupsTextarea.addEventListener("input", updateGroupsCount);
 
   // Caption Save
@@ -700,13 +1018,16 @@ function initEventHandlers() {
   if (btnSaveCaption) {
     btnSaveCaption.addEventListener("click", async () => {
       const text = document.getElementById("post-caption-textarea").value;
-      const res = await fetch("/api/caption", {
+      const { ok, json } = await apiFetch("/api/caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ caption: text })
       });
-      const json = await res.json();
-      showToast(json.message, "success");
+      if (ok && json.status === "success") {
+        showToast("📝 " + json.message, "success");
+      } else {
+        showToast("❌ Gagal simpan caption: " + getApiError(json), "error");
+      }
     });
   }
 
@@ -717,12 +1038,21 @@ function initEventHandlers() {
     uploadZone.addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
       if (fileInput.files.length > 0) {
+        let successCount = 0;
+        let failCount = 0;
         for (let i = 0; i < fileInput.files.length; i++) {
           const formData = new FormData();
           formData.append("file", fileInput.files[i]);
-          await fetch("/api/media/upload", { method: "POST", body: formData });
+          const { ok, json } = await apiFetch("/api/media/upload", { method: "POST", body: formData });
+          if (ok && json.status === "success") successCount++; else failCount++;
         }
-        showToast(`🖼️ ${fileInput.files.length} media berhasil diunggah!`, "success");
+        // Reset fileInput so re-selecting the same file fires 'change' again
+        fileInput.value = "";
+        if (successCount > 0) {
+          showToast(`🖼️ ${successCount} media berhasil diunggah${failCount > 0 ? `, ${failCount} gagal` : ''}!`, failCount > 0 ? "warning" : "success");
+        } else {
+          showToast(`❌ Semua ${failCount} media gagal diunggah`, "error");
+        }
         loadMedia();
         loadStats();
       }
@@ -755,10 +1085,17 @@ function initEventHandlers() {
   const btnStopAutomation = document.getElementById("btn-stop-automation");
   if (btnStopAutomation) {
     btnStopAutomation.addEventListener("click", async () => {
-      if (confirm("Apakah Anda yakin ingin menghentikan seluruh proses otomasi?")) {
-        const res = await fetch("/api/runner/stop", { method: "POST" });
-        const json = await res.json();
-        alert(json.message);
+      if (!confirm("Apakah Anda yakin ingin menghentikan seluruh proses otomasi?")) return;
+      btnStopAutomation.disabled = true;
+      btnStopAutomation.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menghentikan...';
+      const { ok, json } = await apiFetch("/api/runner/stop", { method: "POST" });
+      btnStopAutomation.disabled = false;
+      btnStopAutomation.innerHTML = '<i class="fa-solid fa-circle-stop"></i> Hentikan Otomasi';
+      if (ok && json.status === "success") {
+        showToast("🛑 " + (json.message || "Otomasi dihentikan"), "warning");
+        loadStats();
+      } else {
+        showToast("❌ Gagal: " + getApiError(json), "error");
       }
     });
   }
@@ -776,11 +1113,14 @@ function initEventHandlers() {
   if (btnAddAccount) {
     btnAddAccount.addEventListener("click", async () => {
       const tag = prompt("Masukkan nama panggil alias untuk akun baru ini:", "Akun_Baru");
-      if (tag === null) return;
-      const res = await fetch(`/api/sessions/login-new?tag=${encodeURIComponent(tag)}`, { method: "POST" });
-      const json = await res.json();
-      alert(json.message);
-      switchToTab("tab-logs");
+      if (tag === null || !tag.trim()) return;
+      const { ok, json } = await apiFetch(`/api/sessions/login-new?tag=${encodeURIComponent(tag.trim())}`, { method: "POST" });
+      if (ok && json.status === "success") {
+        showToast("🔑 " + json.message + " Browser GUI akan terbuka untuk login.", "success", 6000);
+        switchToTab("tab-logs");
+      } else {
+        showToast("❌ Gagal: " + getApiError(json), "error");
+      }
     });
   }
 
@@ -794,23 +1134,35 @@ function initEventHandlers() {
   const btnSubmitImport = document.getElementById("btn-submit-import");
   if (btnSubmitImport) {
     btnSubmitImport.addEventListener("click", async () => {
-      const name = document.getElementById("import-name-input").value;
-      const jsonContent = document.getElementById("import-json-textarea").value;
-      if (!jsonContent.trim()) return alert("Isi JSON cookie tidak boleh kosong.");
-
-      const res = await fetch("/api/sessions/import", {
+      const name = document.getElementById("import-name-input").value.trim();
+      const jsonContent = document.getElementById("import-json-textarea").value.trim();
+      if (!jsonContent) {
+        showToast("⚠️ Isi JSON cookie tidak boleh kosong.", "warning");
+        return;
+      }
+      // Validate JSON is parseable before sending
+      try {
+        JSON.parse(jsonContent);
+      } catch (e) {
+        showToast("❌ JSON tidak valid: " + e.message, "error");
+        return;
+      }
+      btnSubmitImport.disabled = true;
+      const { ok, json } = await apiFetch("/api/sessions/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name || "Imported_Account", json_content: jsonContent })
       });
-      const json = await res.json();
-      if (res.ok) {
-        alert(json.message);
+      btnSubmitImport.disabled = false;
+      if (ok && json.status === "success") {
+        showToast("🎉 " + json.message, "success");
         closeModal("modal-import");
+        document.getElementById("import-json-textarea").value = "";
+        document.getElementById("import-name-input").value = "";
         loadSessions();
         loadStats();
       } else {
-        alert("Gagal mengimpor: " + json.detail);
+        showToast("❌ Gagal mengimpor: " + getApiError(json), "error");
       }
     });
   }
@@ -820,23 +1172,55 @@ function initEventHandlers() {
   if (settingsForm) {
     settingsForm.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const delayMin = parseFloat(document.getElementById("cfg-delay-min").value);
+      const delayMax = parseFloat(document.getElementById("cfg-delay-max").value);
+      const maxWorkers = parseInt(document.getElementById("cfg-max-workers").value);
+
+      // Validation
+      if (isNaN(delayMin) || delayMin < 0) {
+        showToast("❌ Jeda minimal harus angka >= 0", "error");
+        return;
+      }
+      if (isNaN(delayMax) || delayMax < 0) {
+        showToast("❌ Jeda maksimal harus angka >= 0", "error");
+        return;
+      }
+      if (delayMin > delayMax) {
+        showToast("❌ Jeda minimal tidak boleh lebih besar dari jeda maksimal", "error");
+        return;
+      }
+      if (isNaN(maxWorkers) || maxWorkers < 1) {
+        showToast("❌ Worker paralel minimal 1", "error");
+        return;
+      }
+
+      // Parse auto_comments from textarea (one per line)
+      const commentsText = document.getElementById("cfg-auto-comments").value;
+      const autoComments = commentsText.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+
       const body = {
-        delay_min: parseFloat(document.getElementById("cfg-delay-min").value),
-        delay_max: parseFloat(document.getElementById("cfg-delay-max").value),
-        max_workers: parseInt(document.getElementById("cfg-max-workers").value),
+        delay_min: delayMin,
+        delay_max: delayMax,
+        max_workers: maxWorkers,
         default_headless: document.getElementById("cfg-headless").value === "true",
         auto_like: document.getElementById("cfg-auto-like").checked,
         auto_comment: document.getElementById("cfg-auto-comment").checked,
-        auto_comments: ["Gasken", "Ready", "Inbox", "Up", "Mantap"]
+        auto_comments: autoComments.length > 0 ? autoComments : ["Up"]
       };
 
-      const res = await fetch("/api/config", {
+      const submitBtn = settingsForm.querySelector('button[type="submit"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...'; }
+      const { ok, json } = await apiFetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      const json = await res.json();
-      alert(json.message);
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Simpan Konfigurasi'; }
+      if (ok && json.status === "success") {
+        showToast("⚙️ " + json.message, "success");
+      } else {
+        showToast("❌ Gagal simpan konfigurasi: " + getApiError(json), "error");
+      }
     });
   }
 
@@ -897,14 +1281,17 @@ function attachAccountCardListeners() {
   document.querySelectorAll(".btn-relogin-acc").forEach(btn => {
     btn.addEventListener("click", async () => {
       const path = btn.getAttribute("data-path");
-      const res = await fetch("/api/sessions/relogin", {
+      const { ok, json } = await apiFetch("/api/sessions/relogin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_path: path })
       });
-      const json = await res.json();
-      alert(json.message);
-      switchToTab("tab-logs");
+      if (ok && json.status === "success") {
+        showToast("🔄 " + json.message, "success");
+        switchToTab("tab-logs");
+      } else {
+        showToast("❌ Gagal relogin: " + getApiError(json), "error");
+      }
     });
   });
 
@@ -922,20 +1309,22 @@ function attachAccountCardListeners() {
   if (btnSaveRename) {
     btnSaveRename.onclick = async () => {
       const path = document.getElementById("rename-path-input").value;
-      const newName = document.getElementById("rename-name-input").value;
-      if (!newName.trim()) return;
-
-      const res = await fetch("/api/sessions/rename", {
+      const newName = document.getElementById("rename-name-input").value.trim();
+      if (!newName) {
+        showToast("⚠️ Nama tidak boleh kosong", "warning");
+        return;
+      }
+      const { ok, json } = await apiFetch("/api/sessions/rename", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_path: path, new_name: newName })
       });
-      const json = await res.json();
-      if (res.ok) {
+      if (ok && json.status === "success") {
+        showToast("✏️ " + json.message, "success");
         closeModal("modal-rename");
         loadSessions();
       } else {
-        alert(json.detail);
+        showToast("❌ Gagal rename: " + getApiError(json), "error");
       }
     };
   }
@@ -943,46 +1332,55 @@ function attachAccountCardListeners() {
   document.querySelectorAll(".btn-delete-acc").forEach(btn => {
     btn.addEventListener("click", async () => {
       const path = btn.getAttribute("data-path");
-      if (confirm(`Apakah Anda yakin ingin menghapus sesi akun ini?\nPath: ${path}`)) {
-        const res = await fetch("/api/sessions/delete", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_path: path })
-        });
-        const json = await res.json();
-        if (res.ok) {
-          loadSessions();
-          loadStats();
-        } else {
-          alert(json.detail);
-        }
+      if (!confirm(`Apakah Anda yakin ingin menghapus sesi akun ini?\nPath: ${path}`)) return;
+      const { ok, json } = await apiFetch("/api/sessions/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_path: path })
+      });
+      if (ok && json.status === "success") {
+        showToast("🗑️ " + json.message, "success");
+        // Hapus cache untuk path ini
+        delete _verifyStatusCache[path];
+        loadSessions();
+        loadStats();
+      } else {
+        showToast("❌ Gagal hapus: " + getApiError(json), "error");
       }
     });
   });
 }
 
 async function triggerCollectGroups() {
-  if (confirm("Jalankan kolektor pencarian grup otomatis sekarang?")) {
-    const res = await fetch("/api/groups/collect", { method: "POST" });
-    const json = await res.json();
-    alert(json.message);
+  if (!confirm("Jalankan kolektor pencarian grup otomatis sekarang?")) return;
+  const { ok, json } = await apiFetch("/api/groups/collect", { method: "POST" });
+  if (ok && json.status === "success") {
+    showToast("🔍 " + json.message, "success");
     switchToTab("tab-logs");
+  } else {
+    showToast("❌ Gagal: " + getApiError(json), "error");
   }
 }
 
 async function startAutomationRun(runAllOverride = false) {
   let selectedSessions = [];
-  
+
   if (runAllOverride) {
-    const res = await fetch("/api/sessions");
-    const json = await res.json();
+    const { ok, json } = await apiFetch("/api/sessions");
+    if (!ok || !Array.isArray(json.sessions)) {
+      showToast("❌ Gagal memuat daftar akun", "error");
+      return;
+    }
     selectedSessions = json.sessions.map(s => s.path);
   } else {
     const accModeEl = document.querySelector('input[name="acc-mode"]:checked');
     const accMode = accModeEl ? accModeEl.value : "all";
     if (accMode === "all") {
-      const res = await fetch("/api/sessions");
-      const json = await res.json();
+      const { ok, json } = await apiFetch("/api/sessions");
+      if (!ok || !Array.isArray(json.sessions)) {
+        showToast("❌ Gagal memuat daftar akun", "error");
+        return;
+      }
       selectedSessions = json.sessions.map(s => s.path);
     } else {
       document.querySelectorAll('input[name="selected-acc"]:checked').forEach(cb => {
@@ -992,33 +1390,57 @@ async function startAutomationRun(runAllOverride = false) {
   }
 
   if (selectedSessions.length === 0) {
-    return alert("Harap pilih minimal 1 akun Facebook untuk diproses.");
+    showToast("⚠️ Harap pilih minimal 1 akun Facebook untuk diproses.", "warning");
+    return;
+  }
+
+  // Validate mode (defense-in-depth, even though <select> enforces it)
+  const mode = document.getElementById("runner-mode-select").value;
+  if (!["1", "2", "3"].includes(mode)) {
+    showToast("❌ Mode tidak valid. Pilih 1 (Post), 2 (Join), atau 3 (Post+Join).", "error");
+    return;
+  }
+
+  // Validate start/end idx
+  const startIdx = parseInt(document.getElementById("runner-start-idx").value) || 1;
+  let endIdx = parseInt(document.getElementById("runner-end-idx").value) || null;
+  if (endIdx !== null && endIdx < 1) {
+    showToast("❌ Index akhir harus >= 1 atau kosongkan untuk semua grup.", "error");
+    return;
+  }
+  if (endIdx !== null && endIdx < startIdx) {
+    showToast("❌ Index akhir tidak boleh lebih kecil dari index awal.", "error");
+    return;
+  }
+
+  const maxWorkers = parseInt(document.getElementById("runner-max-workers").value) || 3;
+  if (maxWorkers < 1 || maxWorkers > 10) {
+    showToast("⚠️ Worker paralel disarankan 1-10. Lanjut dengan nilai default 3.", "warning");
   }
 
   const payload = {
     selected_sessions: selectedSessions,
-    mode: document.getElementById("runner-mode-select").value,
-    start_idx: parseInt(document.getElementById("runner-start-idx").value) || 1,
-    end_idx: parseInt(document.getElementById("runner-end-idx").value) || null,
+    mode: mode,
+    start_idx: startIdx,
+    end_idx: endIdx,
     headless: document.getElementById("runner-headless-select").value === "true",
-    max_workers: parseInt(document.getElementById("runner-max-workers").value) || 3,
+    max_workers: maxWorkers,
     randomize_groups: document.getElementById("runner-randomize-groups").checked,
     custom_caption: document.getElementById("post-caption-textarea").value
   };
 
-  const res = await fetch("/api/runner/start", {
+  const { ok, json } = await apiFetch("/api/runner/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 
-  const json = await res.json();
-  if (res.ok) {
-    showToast("🚀 Otomasi dimulai! Beralih ke Live Monitor...", "success");
+  if (ok && json.status === "success") {
+    showToast("🚀 " + json.message, "success");
     await loadStats();
     switchToTab("tab-monitor");
   } else {
-    showToast("❌ Gagal memulai otomasi: " + (json.detail || json.message || "Unknown error"), "error");
+    showToast("❌ Gagal memulai otomasi: " + getApiError(json), "error", 6000);
   }
 }
 

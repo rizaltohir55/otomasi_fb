@@ -511,6 +511,60 @@
               </div>
             </div>
           </div>
+
+          <!-- Skip-List Grup Panel (NEW) -->
+          <div class="card-panel">
+            <div class="panel-header">
+              <h3><i class="fa-solid fa-ban"></i> Skip-List Grup Gagal Persisten</h3>
+              <div class="header-actions-right">
+                <button class="btn btn-sm btn-outline" id="btn-refresh-skiplist" aria-label="Refresh skip-list">
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" id="btn-clear-skiplist">
+                  <i class="fa-solid fa-trash"></i> Bersihkan Semua
+                </button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <small class="text-muted" style="display:block;margin-bottom:8px;">
+                Grup yang ditandai gagal persisten tidak akan di-retry pada sesi berikutnya.
+                Klik "Bersihkan" untuk reset.
+              </small>
+              <div class="skip-list-container" id="skip-list-container">
+                <div class="empty-monitor-notice">
+                  <i class="fa-solid fa-circle-check"></i>
+                  <p>Belum ada grup di skip-list.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cooldown RESTRICTED Panel (NEW) -->
+          <div class="card-panel">
+            <div class="panel-header">
+              <h3><i class="fa-solid fa-shield-halved"></i> Cooldown Akun RESTRICTED</h3>
+              <div class="header-actions-right">
+                <button class="btn btn-sm btn-outline" id="btn-refresh-cooldown" aria-label="Refresh cooldown">
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" id="btn-clear-cooldown">
+                  <i class="fa-solid fa-trash"></i> Bersihkan Semua
+                </button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <small class="text-muted" style="display:block;margin-bottom:8px;">
+                Akun yang terdeteksi RESTRICTED oleh FB tidak dipakai selama cooldown (default 30 menit)
+                agar tidak memperburuk status rate-limit.
+              </small>
+              <div class="cooldown-container" id="cooldown-container">
+                <div class="empty-monitor-notice">
+                  <i class="fa-solid fa-circle-check"></i>
+                  <p>Tidak ada akun dalam cooldown.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
 
@@ -594,6 +648,12 @@
                     <input type="checkbox" id="cfg-auto-comment">
                     <span>Fitur Auto-Comment Otomatis Setelah Posting</span>
                   </label>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-auto-comments">Daftar Komentar Otomatis (satu per baris):</label>
+                  <textarea id="cfg-auto-comments" rows="4" class="form-input" placeholder="Gasken&#10;Ready&#10;Inbox&#10;Up&#10;Mantap"></textarea>
+                  <small class="text-muted">Komentar dipilih acak dari daftar ini saat Auto-Comment aktif.</small>
                 </div>
 
                 <button type="submit" class="btn btn-primary">
